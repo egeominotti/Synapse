@@ -95,6 +95,15 @@ export class DatabaseCore {
     } catch {
       // Column already exists — ignore
     }
+
+    // Backfill: populate chat_id from telegram_sessions for existing data
+    this.db.exec(`
+      UPDATE sessions SET chat_id = (
+        SELECT ts.chat_id FROM telegram_sessions ts WHERE ts.session_id = sessions.session_id
+      ) WHERE chat_id IS NULL AND EXISTS (
+        SELECT 1 FROM telegram_sessions ts WHERE ts.session_id = sessions.session_id
+      )
+    `)
   }
 
   // ---------------------------------------------------------------------------
