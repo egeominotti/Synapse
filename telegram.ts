@@ -25,7 +25,7 @@ import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, buildMeta, snapshotSandbox, MAX_FILE_SIZE, type TelegramDeps } from "./src/telegram/handlers"
 import { buildMemoryContext } from "./src/memory"
-import { ensureMcpConfig } from "./src/mcp-config"
+import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
 import { dirname } from "path"
 
 // ---------------------------------------------------------------------------
@@ -264,6 +264,7 @@ bot.start({
           `> session:  new\n` +
           `> db:       ${agentConfig.dbPath}\n` +
           `> memory:   ${globalStats ? `${globalStats.totalMessages} msg / ${globalStats.totalSessions} sessions` : "empty"}\n` +
+          `> mcp:      ${getMcpServerNames().length} servers (${getMcpServerNames().join(", ")})\n` +
           `> sandbox:  pending\n` +
           `> chats:    ${knownChatIds.length}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +

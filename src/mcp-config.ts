@@ -61,6 +61,11 @@ const DEFAULT_MCP_SERVERS: McpConfig = {
   },
 }
 
+/** Get the list of default MCP server names. */
+export function getMcpServerNames(): string[] {
+  return Object.keys(DEFAULT_MCP_SERVERS.mcpServers)
+}
+
 /** Write the MCP config file. Overwrites on every boot to stay in sync. */
 export function ensureMcpConfig(configPath: string): string {
   mkdirSync(dirname(configPath), { recursive: true })
