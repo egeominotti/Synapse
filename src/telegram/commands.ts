@@ -84,6 +84,23 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       }
     }
 
+    // Global stats (all sessions)
+    const global = deps.db.getAllStats()
+    if (global) {
+      const avgMs = Math.round(global.totalDurationMs / global.totalMessages)
+      const totalTok = global.totalInputTokens + global.totalOutputTokens
+      lines.push("")
+      lines.push(`📈 *Storico totale:*\n`)
+      lines.push(`Sessioni: *${global.totalSessions}*`)
+      lines.push(`Messaggi: *${global.totalMessages}*`)
+      lines.push(`Durata media: *${(avgMs / 1000).toFixed(1)}s*`)
+      if (totalTok > 0) {
+        lines.push(
+          `Token: *${totalTok.toLocaleString("it-IT")}* (${global.totalInputTokens.toLocaleString("it-IT")} in / ${global.totalOutputTokens.toLocaleString("it-IT")} out)`
+        )
+      }
+    }
+
     await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
   })
 

@@ -112,12 +112,12 @@ bun install
 - **Session continuity**: `--resume <sessionId>` flag resumes conversations
 - **Vision**: Uses `--input-format stream-json` with base64 image data via stdin
 - **Retry**: Exponential backoff on transient errors (429, 503, connection resets)
-- **Timeout**: Races process execution against configurable timeout, kills on exceed
+- **Timeout**: Optional process timeout (default: disabled), kills on exceed
 - **Concurrent I/O**: Reads stdout/stderr in parallel to prevent deadlock
 - **Graceful shutdown**: Signal handlers (SIGINT/SIGTERM) close DB before exit
 - **Atomic persistence**: SQLite WAL mode — no corrupted files on crash
 - **Photo attachments**: Telegram photos stored as BLOBs in `attachments` table, linked to messages
-- **LRU agent eviction**: Telegram bot caps agents at 500 to prevent memory leaks
+- **LRU agent eviction**: Telegram bot caps agents at 500, cleans up sandbox on eviction
 - **Per-chat message queue**: Serial queue per chat prevents race conditions on Claude sessions
 - **HTML formatted output**: Markdown → Telegram HTML conversion with smart chunking and fallback
 - **Edited message support**: Re-processes edited messages through Claude with `[Messaggio modificato]` prefix
@@ -126,11 +126,15 @@ bun install
 - **Sandbox isolation**: Each Agent runs in a temp directory (`/tmp/neo-agent-*`) with CLAUDE.md safety rules
 - **Cross-platform safety rules**: Comprehensive rules prevent destructive operations on Linux, macOS, Windows
 - **Cached spawn env**: `buildSpawnEnv()` cached per token to avoid per-call overhead
-- **Config range validation**: Env vars clamped to safe ranges (timeout 5s–600s, retries 0–10)
+- **Config range validation**: Env vars clamped to safe ranges (timeout 0–600s, retries 0–10)
 - **Photo size check**: Downloads checked against Content-Length before buffering (max 20 MB)
-- **Session cleanup**: Old sessions (>90 days) and orphan mappings cleaned at startup
+- **Session cleanup**: Old sessions (>90 days) and orphan mappings cleaned at startup (batch DELETE with CASCADE)
+- **Session error auto-retry**: Detects stale sessions ("No conversation found", "invalid session") and retries with fresh session
 - **DRY handlers**: `executeWithRetry()` pattern handles snapshot/call/history/format/retry in one place
 - **Modular telegram**: Commands and handlers split into `src/telegram/` for <350 lines per file
+- **Pre-compiled regex**: Formatter regex patterns compiled once at module level, not per call
+- **Sandbox cleanup**: `Agent.cleanup()` removes temp directories on LRU eviction
+- **Async scheduler**: `Bun.sleep` loop instead of `setInterval` — no overlapping ticks
 
 ## Configuration
 
@@ -145,7 +149,7 @@ Admin can change these at runtime via `/config <key> <value>`:
 | Key                | Type    | Default               | Range/Enum               |
 | ------------------ | ------- | --------------------- | ------------------------ |
 | `system_prompt`    | string  | `""`                  | —                        |
-| `timeout_ms`       | number  | `120000`              | 5000–600000              |
+| `timeout_ms`       | number  | `0` (disabled)        | 0–600000                 |
 | `max_retries`      | number  | `3`                   | 0–10                     |
 | `retry_delay_ms`   | number  | `1000`                | 100–30000                |
 | `skip_permissions` | boolean | `true`                | true/false               |

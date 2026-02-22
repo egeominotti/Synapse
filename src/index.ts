@@ -7,7 +7,14 @@ export { loadConfig } from "./config"
 export { DatabaseCore } from "./db-core"
 export { Database } from "./db"
 export { Agent, TimeoutError, isTransientError } from "./agent"
-export { createSandbox, listSandboxFiles, buildSpawnEnv, generateSandboxRules, MIME_TYPES } from "./sandbox"
+export {
+  createSandbox,
+  cleanupSandbox,
+  listSandboxFiles,
+  buildSpawnEnv,
+  generateSandboxRules,
+  MIME_TYPES,
+} from "./sandbox"
 export { HistoryManager } from "./history"
 export { SessionStore } from "./session-store"
 export { Repl } from "./repl"

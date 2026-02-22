@@ -7,7 +7,7 @@ import type { AgentConfig } from "./types"
 import { join } from "path"
 import { homedir } from "os"
 
-const DEFAULT_TIMEOUT_MS = 120_000
+const DEFAULT_TIMEOUT_MS = 0 // 0 = no timeout
 const DEFAULT_MAX_RETRIES = 3
 const DEFAULT_INITIAL_RETRY_DELAY_MS = 1_000
 const DEFAULT_DB_PATH = join(homedir(), ".claude-agent", "neo.db")
@@ -43,7 +43,7 @@ function getOptionalEnvInt(key: string, fallback: number, min?: number, max?: nu
 export function loadConfig(): AgentConfig {
   return {
     token: getRequiredEnv("CLAUDE_CODE_OAUTH_TOKEN"),
-    timeoutMs: getOptionalEnvInt("CLAUDE_AGENT_TIMEOUT_MS", DEFAULT_TIMEOUT_MS, 5_000, 600_000),
+    timeoutMs: getOptionalEnvInt("CLAUDE_AGENT_TIMEOUT_MS", DEFAULT_TIMEOUT_MS, 0, 600_000),
     maxRetries: getOptionalEnvInt("CLAUDE_AGENT_MAX_RETRIES", DEFAULT_MAX_RETRIES, 0, 10),
     initialRetryDelayMs: getOptionalEnvInt("CLAUDE_AGENT_RETRY_DELAY_MS", DEFAULT_INITIAL_RETRY_DELAY_MS, 100, 30_000),
     dbPath: Bun.env.CLAUDE_AGENT_DB_PATH ?? DEFAULT_DB_PATH,

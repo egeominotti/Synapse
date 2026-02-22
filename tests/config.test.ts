@@ -41,7 +41,7 @@ describe("loadConfig", () => {
     const config = loadConfig()
 
     expect(config.token).toBe("test-token-123")
-    expect(config.timeoutMs).toBe(120_000)
+    expect(config.timeoutMs).toBe(0) // 0 = no timeout
     expect(config.maxRetries).toBe(3)
     expect(config.initialRetryDelayMs).toBe(1_000)
     expect(config.dbPath).toBe(join(homedir(), ".claude-agent", "neo.db"))
@@ -78,14 +78,14 @@ describe("loadConfig", () => {
 
   it("clamps values below minimum", async () => {
     Bun.env.CLAUDE_CODE_OAUTH_TOKEN = "tok"
-    Bun.env.CLAUDE_AGENT_TIMEOUT_MS = "100"
+    Bun.env.CLAUDE_AGENT_TIMEOUT_MS = "-1"
     Bun.env.CLAUDE_AGENT_MAX_RETRIES = "-1"
     Bun.env.CLAUDE_AGENT_RETRY_DELAY_MS = "10"
 
     const { loadConfig } = await import("../src/config")
     const config = loadConfig()
 
-    expect(config.timeoutMs).toBe(5_000)
+    expect(config.timeoutMs).toBe(0) // min is 0 (no timeout)
     expect(config.maxRetries).toBe(0)
     expect(config.initialRetryDelayMs).toBe(100)
   })

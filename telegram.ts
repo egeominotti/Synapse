@@ -84,7 +84,10 @@ function getAgent(chatId: number): Agent {
 
   if (agents.size >= MAX_AGENTS) {
     const oldestKey = agents.keys().next().value!
+    const evicted = agents.get(oldestKey)
+    evicted?.cleanup()
     agents.delete(oldestKey)
+    histories.delete(oldestKey)
     logger.debug("Agent evicted (LRU)", { evictedChatId: oldestKey, mapSize: agents.size })
   }
 
@@ -203,6 +206,13 @@ process.on("SIGTERM", () => shutdown("SIGTERM"))
 await store.load()
 logger.info("Sessions loaded", { count: store.size })
 
+// Save known chat IDs before clearing stale sessions (for startup message)
+const knownChatIds = db.getAllTelegramSessions().map((s) => s.chat_id)
+
+// Clear stale Claude CLI sessions — they don't survive process restarts
+store.clearAll()
+logger.info("Stale sessions cleared on startup")
+
 // Cleanup old sessions on startup (90 days)
 const deletedSessions = db.cleanupOldSessions(90)
 const deletedOrphans = db.cleanupOrphanTelegramSessions()
@@ -213,5 +223,33 @@ if (deletedSessions > 0 || deletedOrphans > 0) {
 scheduler.start()
 logger.info("Bot polling started")
 bot.start({
-  onStart: (info) => logger.info(`Bot online: @${info.username}`),
+  onStart: async (info) => {
+    logger.info(`Bot online: @${info.username}`)
+
+    // Send startup message to all known chats
+    if (knownChatIds.length > 0) {
+      const uptime = new Date().toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+
+      for (const chatId of knownChatIds) {
+        const msg =
+          `<code>Wake up, Neo...</code>\n` +
+          `<code>The Matrix has you...</code>\n` +
+          `<code>Follow the white rabbit.</code>\n\n` +
+          `<code>` +
+          `> system.boot()\n` +
+          `> agent:    @${info.username}\n` +
+          `> time:     ${uptime}\n` +
+          `> session:  new\n` +
+          `> db:       ${agentConfig.dbPath}\n` +
+          `> sandbox:  pending\n` +
+          `> chats:    ${knownChatIds.length}\n` +
+          `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
+          `> retry:    ${agentConfig.maxRetries}x\n` +
+          `> status:   ONLINE` +
+          `</code>\n\n` +
+          `<i>Knock, knock, Neo.</i>`
+        bot.api.sendMessage(chatId, msg, { parse_mode: "HTML" }).catch(() => {})
+      }
+    }
+  },
 })

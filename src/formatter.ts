@@ -21,13 +21,28 @@ function escapeHtml(text: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Markdown → Telegram HTML
+// Markdown → Telegram HTML (pre-compiled regex for performance)
 // ---------------------------------------------------------------------------
+
+const RE_FENCED_CODE = /```(\w*)\n?([\s\S]*?)```/g
+const RE_INLINE_CODE = /`([^`\n]+)`/g
+const RE_HEADING = /^#{1,6}\s+(.+)$/gm
+const RE_HR = /^[-*_]{3,}\s*$/gm
+const RE_BOLD_STAR = /\*\*(.+?)\*\*/g
+const RE_BOLD_UNDER = /__(.+?)__/g
+const RE_ITALIC_STAR = /(?<!\w)\*([^*\n]+?)\*(?!\w)/g
+const RE_ITALIC_UNDER = /(?<!\w)_([^_\n]+?)_(?!\w)/g
+const RE_STRIKE = /~~(.+?)~~/g
+const RE_LINK = /\[([^\]]+)\]\(([^)]+)\)/g
+const RE_BLOCKQUOTE = /^&gt;\s?(.+)$/gm
+const RE_BLOCKQUOTE_MERGE = /<\/blockquote>\n<blockquote>/g
+const RE_RESTORE_CB = /\uE000CB(\d+)\uE000/g
+const RE_RESTORE_IC = /\uE001IC(\d+)\uE001/g
 
 export function markdownToTelegramHtml(md: string): string {
   // --- Protect fenced code blocks ---
   const codeBlocks: string[] = []
-  let result = md.replace(/```(\w*)\n?([\s\S]*?)```/g, (_match, lang: string, code: string) => {
+  let result = md.replace(RE_FENCED_CODE, (_match, lang: string, code: string) => {
     const idx = codeBlocks.length
     const langAttr = lang ? ` class="language-${escapeHtml(lang)}"` : ""
     codeBlocks.push(`<pre><code${langAttr}>${escapeHtml(code.trimEnd())}</code></pre>`)
@@ -36,7 +51,7 @@ export function markdownToTelegramHtml(md: string): string {
 
   // --- Protect inline code ---
   const inlineCodes: string[] = []
-  result = result.replace(/`([^`\n]+)`/g, (_match, code: string) => {
+  result = result.replace(RE_INLINE_CODE, (_match, code: string) => {
     const idx = inlineCodes.length
     inlineCodes.push(`<code>${escapeHtml(code)}</code>`)
     return `\uE001IC${idx}\uE001`
@@ -45,34 +60,21 @@ export function markdownToTelegramHtml(md: string): string {
   // --- Escape HTML in the rest ---
   result = escapeHtml(result)
 
-  // --- Headings → bold (Telegram has no heading tags) ---
-  result = result.replace(/^#{1,6}\s+(.+)$/gm, "<b>$1</b>")
-
-  // --- Horizontal rules → thin line ---
-  result = result.replace(/^[-*_]{3,}\s*$/gm, "———")
-
-  // --- Bold: **text** or __text__ ---
-  result = result.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
-  result = result.replace(/__(.+?)__/g, "<b>$1</b>")
-
-  // --- Italic: *text* or _text_ (word-boundary aware) ---
-  result = result.replace(/(?<!\w)\*([^*\n]+?)\*(?!\w)/g, "<i>$1</i>")
-  result = result.replace(/(?<!\w)_([^_\n]+?)_(?!\w)/g, "<i>$1</i>")
-
-  // --- Strikethrough: ~~text~~ ---
-  result = result.replace(/~~(.+?)~~/g, "<s>$1</s>")
-
-  // --- Links: [text](url) ---
-  result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-
-  // --- Blockquotes: > text ---
-  result = result.replace(/^&gt;\s?(.+)$/gm, "<blockquote>$1</blockquote>")
-  // Merge consecutive blockquotes into one
-  result = result.replace(/<\/blockquote>\n<blockquote>/g, "\n")
+  // --- Convert Markdown syntax ---
+  result = result.replace(RE_HEADING, "<b>$1</b>")
+  result = result.replace(RE_HR, "———")
+  result = result.replace(RE_BOLD_STAR, "<b>$1</b>")
+  result = result.replace(RE_BOLD_UNDER, "<b>$1</b>")
+  result = result.replace(RE_ITALIC_STAR, "<i>$1</i>")
+  result = result.replace(RE_ITALIC_UNDER, "<i>$1</i>")
+  result = result.replace(RE_STRIKE, "<s>$1</s>")
+  result = result.replace(RE_LINK, '<a href="$2">$1</a>')
+  result = result.replace(RE_BLOCKQUOTE, "<blockquote>$1</blockquote>")
+  result = result.replace(RE_BLOCKQUOTE_MERGE, "\n")
 
   // --- Restore protected code ---
-  result = result.replace(/\uE000CB(\d+)\uE000/g, (_m, idx) => codeBlocks[Number(idx)])
-  result = result.replace(/\uE001IC(\d+)\uE001/g, (_m, idx) => inlineCodes[Number(idx)])
+  result = result.replace(RE_RESTORE_CB, (_m, idx) => codeBlocks[Number(idx)])
+  result = result.replace(RE_RESTORE_IC, (_m, idx) => inlineCodes[Number(idx)])
 
   return result.trim()
 }

@@ -4,7 +4,7 @@
  * that prevent Claude from modifying system files.
  */
 
-import { mkdtempSync, readdirSync, statSync, writeFileSync } from "fs"
+import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "fs"
 import { join, relative } from "path"
 import { tmpdir } from "os"
 import { logger } from "./logger"
@@ -140,6 +140,16 @@ export function createSandbox(): string {
   const sandboxDir = mkdtempSync(join(tmpdir(), "neo-agent-"))
   writeFileSync(join(sandboxDir, "CLAUDE.md"), generateSandboxRules(sandboxDir))
   return sandboxDir
+}
+
+/** Remove the sandbox directory and all its contents. */
+export function cleanupSandbox(sandboxDir: string): void {
+  try {
+    rmSync(sandboxDir, { recursive: true, force: true })
+    logger.debug("Sandbox cleaned up", { dir: sandboxDir })
+  } catch (err) {
+    logger.warn("Failed to cleanup sandbox", { dir: sandboxDir, error: String(err) })
+  }
 }
 
 /**

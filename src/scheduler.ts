@@ -92,7 +92,7 @@ export function parseSchedule(expr: string, now = new Date()): ScheduleSpec {
 export class Scheduler {
   private readonly db: Database
   private readonly executor: JobExecutor
-  private tickHandle: ReturnType<typeof setInterval> | null = null
+  private running = false
 
   constructor(db: Database, executor: JobExecutor) {
     this.db = db
@@ -101,20 +101,26 @@ export class Scheduler {
 
   /** Start the ticker. Runs every 60s. */
   start(): void {
-    if (this.tickHandle) return
+    if (this.running) return
+    this.running = true
     logger.info("Scheduler started")
-
-    // Run immediately on start, then every 60s
-    this.tick()
-    this.tickHandle = setInterval(() => this.tick(), TICK_INTERVAL_MS)
+    this.runLoop()
   }
 
   /** Stop the ticker. */
   stop(): void {
-    if (this.tickHandle) {
-      clearInterval(this.tickHandle)
-      this.tickHandle = null
+    if (this.running) {
+      this.running = false
       logger.info("Scheduler stopped")
+    }
+  }
+
+  /** Async loop: tick → sleep → repeat. No overlapping ticks. */
+  private async runLoop(): Promise<void> {
+    await this.tick()
+    while (this.running) {
+      await Bun.sleep(TICK_INTERVAL_MS)
+      if (this.running) await this.tick()
     }
   }
 

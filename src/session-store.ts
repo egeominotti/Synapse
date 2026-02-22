@@ -43,4 +43,12 @@ export class SessionStore {
     this.db.deleteTelegramSession(chatId)
     this.cache.delete(chatId)
   }
+
+  /** Clear all session mappings (cache + DB). Used on startup to discard stale CLI sessions. */
+  clearAll(): void {
+    for (const chatId of this.cache.keys()) {
+      this.db.deleteTelegramSession(chatId)
+    }
+    this.cache.clear()
+  }
 }

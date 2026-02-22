@@ -215,6 +215,43 @@ export class DatabaseCore {
     }
   }
 
+  /** Aggregate stats across ALL sessions (global). */
+  getAllStats(): {
+    totalMessages: number
+    totalDurationMs: number
+    totalInputTokens: number
+    totalOutputTokens: number
+    totalSessions: number
+  } | null {
+    const row = this.db
+      .query(
+        `SELECT
+           COUNT(*) as total_messages,
+           COALESCE(SUM(duration_ms), 0) as total_duration_ms,
+           COALESCE(SUM(input_tokens), 0) as total_input_tokens,
+           COALESCE(SUM(output_tokens), 0) as total_output_tokens,
+           COUNT(DISTINCT session_id) as total_sessions
+         FROM messages`
+      )
+      .get() as {
+      total_messages: number
+      total_duration_ms: number
+      total_input_tokens: number
+      total_output_tokens: number
+      total_sessions: number
+    } | null
+
+    if (!row || row.total_messages === 0) return null
+
+    return {
+      totalMessages: row.total_messages,
+      totalDurationMs: row.total_duration_ms,
+      totalInputTokens: row.total_input_tokens,
+      totalOutputTokens: row.total_output_tokens,
+      totalSessions: row.total_sessions,
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Session listing
   // ---------------------------------------------------------------------------
@@ -323,19 +360,18 @@ export class DatabaseCore {
    */
   cleanupOldSessions(days = 90): number {
     const cutoff = new Date(Date.now() - days * 86_400_000).toISOString()
-    const rows = this.db.query("SELECT session_id FROM sessions WHERE updated_at < ?").all(cutoff) as Array<{
-      session_id: string
-    }>
 
-    if (rows.length === 0) return 0
-
-    for (const row of rows) {
-      this.db.run("DELETE FROM messages WHERE session_id = ?", [row.session_id])
-      this.db.run("DELETE FROM sessions WHERE session_id = ?", [row.session_id])
+    // Count first (changes includes CASCADE deletes which inflates the number)
+    const row = this.db.query("SELECT COUNT(*) as cnt FROM sessions WHERE updated_at < ?").get(cutoff) as {
+      cnt: number
     }
+    if (row.cnt === 0) return 0
 
-    logger.info("Old sessions cleaned up", { deleted: rows.length, olderThan: `${days}d` })
-    return rows.length
+    // CASCADE handles messages + attachments automatically
+    this.db.run("DELETE FROM sessions WHERE updated_at < ?", [cutoff])
+
+    logger.info("Old sessions cleaned up", { deleted: row.cnt, olderThan: `${days}d` })
+    return row.cnt
   }
 
   // ---------------------------------------------------------------------------

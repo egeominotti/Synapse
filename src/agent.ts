@@ -9,7 +9,7 @@ import { existsSync } from "fs"
 import { extname } from "path"
 import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage } from "./types"
 import { logger } from "./logger"
-import { createSandbox, listSandboxFiles, buildSpawnEnv, MIME_TYPES } from "./sandbox"
+import { createSandbox, cleanupSandbox, listSandboxFiles, buildSpawnEnv, MIME_TYPES } from "./sandbox"
 
 /** Errors that are considered transient and safe to retry */
 const TRANSIENT_PATTERNS = [
@@ -53,6 +53,11 @@ export class Agent {
   /** List user-created files in the sandbox (excludes CLAUDE.md) */
   listSandboxFiles(): Array<{ path: string; mtimeMs: number }> {
     return listSandboxFiles(this.sandboxDir)
+  }
+
+  /** Remove the sandbox directory. Call before discarding the agent. */
+  cleanup(): void {
+    cleanupSandbox(this.sandboxDir)
   }
 
   getSessionId(): string | null {
@@ -227,17 +232,20 @@ export class Agent {
     const readPromise = Promise.all([readText(proc.stdout), readText(proc.stderr)])
 
     let timedOut = false
-    const timeoutHandle = setTimeout(() => {
-      timedOut = true
-      proc.kill()
-    }, this.config.timeoutMs)
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    if (this.config.timeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true
+        proc.kill()
+      }, this.config.timeoutMs)
+    }
 
     let rawStdout: string
     let stderrText: string
     try {
       ;[rawStdout, stderrText] = await readPromise
     } finally {
-      clearTimeout(timeoutHandle)
+      if (timeoutHandle) clearTimeout(timeoutHandle)
     }
 
     if (timedOut) throw new TimeoutError(this.config.timeoutMs)

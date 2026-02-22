@@ -154,6 +154,7 @@ function isSessionError(errorMsg: string): boolean {
   return (
     lower.includes("invalid session") ||
     lower.includes("session not found") ||
+    lower.includes("no conversation found") ||
     lower.includes("session_id") ||
     lower.includes("could not resume") ||
     lower.includes("unable to resume") ||
@@ -204,10 +205,9 @@ async function executeWithRetry(
     await execute(deps.getAgent(chatId))
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    logger.error("Agent call failed", { chatId, error: msg })
 
     if (isSessionError(msg)) {
-      logger.warn("Session expired, retrying with fresh session", { chatId })
+      logger.debug("Stale session, resetting", { chatId, error: msg })
       try {
         await execute(resetAgentSession(chatId, deps))
       } catch (retryErr) {

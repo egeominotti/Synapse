@@ -13,7 +13,7 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 - **Message Queue** — Per-chat serial queue prevents race conditions on Claude sessions
 - **Edit Support** — Edit a sent message to re-process it through Claude
 - **Session Export** — `/export` downloads the full conversation as a Markdown file
-- **Retry & Timeout** — Exponential backoff on transient errors, configurable timeout
+- **Retry** — Exponential backoff on transient errors, optional configurable timeout
 - **Docker Isolation** — Optional containerized execution with resource limits
 - **Job Scheduler** — Schedule prompts: `at 18:00`, `every 09:00`, `in 30m` (SQLite-backed, 60s ticker)
 - **Sandbox Isolation** — Each Agent runs in `/tmp/neo-agent-*` with cross-platform safety rules
@@ -49,7 +49,7 @@ cp .env.example .env  # edit with your tokens
 | `TELEGRAM_BOT_TOKEN`            | Bot only | —                        | Telegram bot token from @BotFather            |
 | `TELEGRAM_ADMIN_ID`             | No       | —                        | Telegram chat ID for admin access (`/config`) |
 | `CLAUDE_AGENT_SYSTEM_PROMPT`    | No       | `""`                     | Custom agent persona/instructions             |
-| `CLAUDE_AGENT_TIMEOUT_MS`       | No       | `120000`                 | Max response time (ms)                        |
+| `CLAUDE_AGENT_TIMEOUT_MS`       | No       | `0` (disabled)           | Max response time (ms), 0 = no timeout        |
 | `CLAUDE_AGENT_MAX_RETRIES`      | No       | `3`                      | Retry attempts on transient errors            |
 | `CLAUDE_AGENT_RETRY_DELAY_MS`   | No       | `1000`                   | Initial retry backoff (ms)                    |
 | `CLAUDE_AGENT_DB_PATH`          | No       | `~/.claude-agent/neo.db` | SQLite database path                          |
@@ -120,7 +120,7 @@ Set `TELEGRAM_ADMIN_ID` to your Telegram chat ID. Then use:
 | Key                | Type    | Default               | Range                 |
 | ------------------ | ------- | --------------------- | --------------------- |
 | `system_prompt`    | string  | `""`                  | —                     |
-| `timeout_ms`       | number  | `120000`              | 5000–600000           |
+| `timeout_ms`       | number  | `0` (disabled)        | 0–600000              |
 | `max_retries`      | number  | `3`                   | 0–10                  |
 | `retry_delay_ms`   | number  | `1000`                | 100–30000             |
 | `skip_permissions` | boolean | `true`                | —                     |
