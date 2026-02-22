@@ -6,7 +6,9 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 
 - **REPL** — Terminal interface with slash commands, multiline input, vision support
 - **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, LRU agent eviction
+- **Voice Transcription** — Optional local speech-to-text via whisper.cpp (OGG Opus → WAV → text)
 - **HTML Formatted Output** — Claude's Markdown converted to Telegram HTML with smart chunking
+- **MCP Servers** — Memory, Sequential Thinking, Fetch, Filesystem, Git, SQLite, Everything
 - **Runtime Config** — Change all agent parameters live from Telegram (`/config`), admin-only
 - **SQLite Persistence** — Sessions, messages, attachments, config in a single atomic database
 - **Vision** — Send images via `/image` (REPL) or photo messages (Telegram), photos persisted as BLOBs
@@ -15,9 +17,9 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 - **Session Export** — `/export` downloads the full conversation as a Markdown file
 - **Retry** — Exponential backoff on transient errors, optional configurable timeout
 - **Docker Isolation** — Optional containerized execution with resource limits
-- **Job Scheduler** — Schedule prompts: `at 18:00`, `every 09:00`, `in 30m` (SQLite-backed, 60s ticker)
 - **Sandbox Isolation** — Each Agent runs in `/tmp/neo-agent-*` with cross-platform safety rules
-- **Test Suite** — 206 tests across 13 files (bun:test)
+- **Conversation Memory** — Recent messages injected as context when starting new sessions
+- **Test Suite** — 283 tests across 17 files (bun:test)
 - **CI/CD** — GitHub Actions pipeline + Husky pre-commit hooks (typecheck, lint, format)
 
 ## Requirements
@@ -25,6 +27,11 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 - [Bun](https://bun.sh) runtime
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed globally
 - Anthropic OAuth token
+
+### Optional
+
+- **whisper-cpp + ffmpeg** — for voice message transcription (`brew install whisper-cpp ffmpeg`)
+- **Docker** — for containerized agent execution
 
 ## Quick Setup
 
@@ -43,20 +50,23 @@ cp .env.example .env  # edit with your tokens
 
 ### Environment Variables
 
-| Variable                        | Required | Default                  | Description                                   |
-| ------------------------------- | -------- | ------------------------ | --------------------------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN`       | Yes      | —                        | Claude CLI auth token                         |
-| `TELEGRAM_BOT_TOKEN`            | Bot only | —                        | Telegram bot token from @BotFather            |
-| `TELEGRAM_ADMIN_ID`             | No       | —                        | Telegram chat ID for admin access (`/config`) |
-| `CLAUDE_AGENT_SYSTEM_PROMPT`    | No       | `""`                     | Custom agent persona/instructions             |
-| `CLAUDE_AGENT_TIMEOUT_MS`       | No       | `0` (disabled)           | Max response time (ms), 0 = no timeout        |
-| `CLAUDE_AGENT_MAX_RETRIES`      | No       | `3`                      | Retry attempts on transient errors            |
-| `CLAUDE_AGENT_RETRY_DELAY_MS`   | No       | `1000`                   | Initial retry backoff (ms)                    |
-| `CLAUDE_AGENT_DB_PATH`          | No       | `~/.claude-agent/neo.db` | SQLite database path                          |
-| `CLAUDE_AGENT_LOG_LEVEL`        | No       | `INFO`                   | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`        |
-| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No       | `1`                      | Skip CLI permission prompts                   |
-| `CLAUDE_AGENT_DOCKER`           | No       | `0`                      | Run in Docker containers                      |
-| `CLAUDE_AGENT_DOCKER_IMAGE`     | No       | `claude-agent:latest`    | Docker image name                             |
+| Variable                        | Required | Default                  | Description                                           |
+| ------------------------------- | -------- | ------------------------ | ----------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`       | Yes      | —                        | Claude CLI auth token                                 |
+| `TELEGRAM_BOT_TOKEN`            | Bot only | —                        | Telegram bot token from @BotFather                    |
+| `TELEGRAM_ADMIN_ID`             | No       | —                        | Telegram chat ID for admin access (`/config`)         |
+| `CLAUDE_AGENT_SYSTEM_PROMPT`    | No       | `""`                     | Custom agent persona/instructions                     |
+| `CLAUDE_AGENT_TIMEOUT_MS`       | No       | `0` (disabled)           | Max response time (ms), 0 = no timeout                |
+| `CLAUDE_AGENT_MAX_RETRIES`      | No       | `3`                      | Retry attempts on transient errors                    |
+| `CLAUDE_AGENT_RETRY_DELAY_MS`   | No       | `1000`                   | Initial retry backoff (ms)                            |
+| `CLAUDE_AGENT_DB_PATH`          | No       | `~/.claude-agent/neo.db` | SQLite database path                                  |
+| `CLAUDE_AGENT_LOG_LEVEL`        | No       | `INFO`                   | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`                |
+| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No       | `1`                      | Skip CLI permission prompts                           |
+| `CLAUDE_AGENT_DOCKER`           | No       | `0`                      | Run in Docker containers                              |
+| `CLAUDE_AGENT_DOCKER_IMAGE`     | No       | `claude-agent:latest`    | Docker image name                                     |
+| `WHISPER_MODEL_PATH`            | No       | —                        | Path to ggml model file (enables voice transcription) |
+| `WHISPER_LANGUAGE`              | No       | `it`                     | Whisper transcription language (ISO 639-1)            |
+| `WHISPER_THREADS`               | No       | `4`                      | CPU threads for whisper (1–16)                        |
 
 ## Usage
 
@@ -82,26 +92,42 @@ bun run index.ts
 ### Telegram Bot
 
 ```bash
-bun run telegram.ts
+bun run run.ts
 ```
 
 #### Bot Commands
 
-| Command            | Description                                         |
-| ------------------ | --------------------------------------------------- |
-| `/start`           | Welcome message                                     |
-| `/help`            | Available commands                                  |
-| `/reset`           | Clear session                                       |
-| `/stats`           | Session statistics                                  |
-| `/export`          | Download conversation as file                       |
-| `/ping`            | Bot health check                                    |
-| `/schedule`        | Schedule a job (`at HH:MM`, `every HH:MM`, `in Nm`) |
-| `/jobs`            | List active scheduled jobs                          |
-| `/job delete <id>` | Delete a scheduled job                              |
-| `/config`          | Runtime configuration (admin only)                  |
+| Command   | Description                        |
+| --------- | ---------------------------------- |
+| `/start`  | Welcome message                    |
+| `/help`   | Available commands                 |
+| `/reset`  | Clear session                      |
+| `/stats`  | Session statistics                 |
+| `/export` | Download conversation as file      |
+| `/ping`   | Bot health check                   |
+| `/config` | Runtime configuration (admin only) |
 
 Send photos with optional captions for vision analysis.
+Send voice messages for automatic transcription via whisper.
 Edit a sent message to re-send it to Claude.
+
+#### Voice Transcription
+
+When `WHISPER_MODEL_PATH` is set and `whisper-cli` + `ffmpeg` are installed:
+
+1. Send a voice message or audio file on Telegram
+2. The bot shows the transcription: `"text"`
+3. The transcription is sent to Claude as a prompt
+4. Claude's response is sent back
+
+Setup:
+
+```bash
+brew install whisper-cpp ffmpeg
+curl -L -o ~/.claude-agent/ggml-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+# Set WHISPER_MODEL_PATH=~/.claude-agent/ggml-base.bin in .env
+```
 
 #### Runtime Configuration (Admin Only)
 
@@ -133,7 +159,7 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 ### Development
 
 ```bash
-bun test              # Run 206 tests
+bun test              # Run 283 tests
 bun run typecheck     # TypeScript check
 bun run lint          # ESLint
 bun run format:check  # Prettier check
@@ -144,87 +170,77 @@ bun run format        # Auto-format
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                      Entry Points                             │
-│                                                               │
-│   index.ts (REPL)               telegram.ts (Bot)             │
-│       │                              │                        │
-│       ▼                              ▼                        │
-│   ┌───────┐                     ┌─────────┐                  │
-│   │ Repl  │                     │ grammy  │                  │
-│   │       │                     │  Bot    │                  │
-│   └───┬───┘                     └────┬────┘                  │
-│       │                              │                        │
-│       ▼                              ▼                        │
-│   ┌─────────────────────────────────────┐                    │
-│   │             Agent                    │                    │
-│   │  Bun.spawn("claude --print ...")     │                    │
-│   │  Retry + Timeout + JSON parsing      │                    │
-│   └───────────────┬─────────────────────┘                    │
-│                   │                                           │
-│       ┌───────────┼───────────┐                              │
-│       ▼           ▼           ▼                               │
-│  ┌──────────┐ ┌────────────┐ ┌───────────────┐              │
-│  │ History  │ │ Session    │ │ Runtime       │              │
-│  │ Manager  │ │ Store      │ │ Config        │              │
-│  └────┬─────┘ └─────┬──────┘ └──────┬────────┘              │
-│       │              │               │                        │
-│       ▼              ▼               ▼                        │
-│  ┌────────────────────────────────────────────┐              │
-│  │            Database (SQLite)                │              │
-│  │  sessions │ messages │ attachments          │              │
-│  │  telegram │ config   │ jobs │ neo.db (WAL)   │              │
-│  └────────────────────────────────────────────┘              │
-│                                                               │
-│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────┐      │
-│  │ ChatQueue │ │ Formatter │ │ Scheduler │ │ Logger │      │
-│  └───────────┘ └───────────┘ └───────────┘ └────────┘      │
-│  ┌───────┐                                                  │
-│  │ Utils │                                                  │
-│  └───────┘                                                  │
+│                      Entry Points                            │
+│                                                              │
+│   index.ts (REPL)               run.ts (Bot)                │
+│       │                              │                       │
+│       ▼                              ▼                       │
+│   ┌───────┐                     ┌─────────┐                 │
+│   │ Repl  │                     │ grammy  │                 │
+│   │       │                     │  Bot    │                 │
+│   └───┬───┘                     └────┬────┘                 │
+│       │                              │                       │
+│       ▼                              ▼                       │
+│   ┌─────────────────────────────────────┐                   │
+│   │             Agent                    │                   │
+│   │  Bun.spawn("claude --print ...")     │                   │
+│   │  Retry + Timeout + JSON parsing      │                   │
+│   └───────────────┬─────────────────────┘                   │
+│                   │                                          │
+│       ┌───────────┼───────────┐                             │
+│       ▼           ▼           ▼                              │
+│  ┌──────────┐ ┌────────────┐ ┌───────────────┐             │
+│  │ History  │ │ Session    │ │ Runtime       │             │
+│  │ Manager  │ │ Store      │ │ Config        │             │
+│  └────┬─────┘ └─────┬──────┘ └──────┬────────┘             │
+│       │              │               │                       │
+│       ▼              ▼               ▼                       │
+│  ┌────────────────────────────────────────────┐             │
+│  │            Database (SQLite)                │             │
+│  │  sessions │ messages │ attachments          │             │
+│  │  telegram │ config   │ jobs │ neo.db (WAL)  │             │
+│  └────────────────────────────────────────────┘             │
+│                                                              │
+│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────┐     │
+│  │ ChatQueue │ │ Formatter │ │ Scheduler │ │ Logger │     │
+│  └───────────┘ └───────────┘ └───────────┘ └────────┘     │
+│  ┌─────────┐ ┌────────┐                                    │
+│  │ Whisper │ │ Memory │                                    │
+│  └─────────┘ └────────┘                                    │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 ### File Structure
 
 ```
-index.ts             REPL entry point — wires Agent + HistoryManager + Repl
-telegram.ts          Telegram bot entry point (init, caches, scheduler, startup)
+index.ts             REPL entry point
+run.ts               Telegram bot entry point (init, caches, whisper, startup)
 src/
   agent.ts           Claude CLI wrapper (spawn, retry, timeout, vision)
   sandbox.ts         Sandbox creation, safety rules, file listing, spawn env
   db-core.ts         Database base class (schema, sessions, messages, attachments, cleanup)
   db.ts              Database extends DatabaseCore (Telegram sessions, config, jobs)
-  chat-queue.ts      Per-chat serial message queue (prevents race conditions)
+  chat-queue.ts      Per-chat serial message queue
   config.ts          Environment-based configuration with range validation
   formatter.ts       Markdown → Telegram HTML converter + smart chunking
+  memory.ts          Conversation memory builder for session context
+  mcp-config.ts      MCP server configuration generator
   runtime-config.ts  Runtime config manager (validate, persist, apply via /config)
-  scheduler.ts       Job scheduler (SQLite-backed, 60s ticker, once/recurring/delay)
+  scheduler.ts       Job scheduler (croner-based, SQLite-backed)
   history.ts         Session & message persistence (SQLite-backed)
-  repl.ts            Interactive terminal with 8 slash commands
+  whisper.ts         Speech-to-text via whisper-cli + ffmpeg
+  repl.ts            Interactive terminal with slash commands
   repl-commands.ts   REPL command implementations (pure functions)
   session-store.ts   Telegram chatId → sessionId mapping (SQLite-backed)
-  types.ts           All TypeScript interfaces (AgentConfig, RuntimeConfigKey, etc.)
-  logger.ts          Structured logging to stderr (4 levels, session context)
-  spinner.ts         Braille terminal spinner animation
+  types.ts           All TypeScript interfaces
+  logger.ts          Structured logging to stderr
+  spinner.ts         Terminal spinner animation
   utils.ts           Duration formatting helper
   index.ts           Barrel re-exports
   telegram/
     handlers.ts      Message handlers with DRY executeWithRetry pattern
     commands.ts      Bot commands (/start, /help, /reset, /stats, /config, etc.)
-tests/
-  db.test.ts              25 tests — schema, CRUD, stats, cleanup
-  history.test.ts         15 tests — init, addMessage, loadSession, stats
-  session-store.test.ts   10 tests — load, get, set, delete, persistence
-  agent.test.ts           22 tests — parseResponse, TimeoutError, buildArgs
-  config.test.ts           5 tests — defaults, env vars, range validation
-  runtime-config.test.ts  21 tests — get/set, validation, reset, persistence
-  formatter.test.ts       29 tests — Markdown→HTML conversion, chunking
-  chat-queue.test.ts       5 tests — serial ordering, concurrency, error recovery
-  scheduler.test.ts       19 tests — parseSchedule, DB CRUD, Scheduler limits
-  sandbox.test.ts         20 tests — MIME types, spawn env, sandbox, file listing
-  repl-commands.test.ts   13 tests — parseImageArgs, writeMeta, printBanner, printStats
-  utils.test.ts            3 tests — formatDuration
-  logger.test.ts           9 tests — levels, filtering, session ID
+tests/               283 tests across 17 files
 ```
 
 ### Data Flow
@@ -255,6 +271,27 @@ Formatter.formatForTelegram()   ← Markdown → HTML + smart chunk
 ctx.reply(chunk, { parse_mode: "HTML" })
 ```
 
+#### Voice Flow
+
+```
+Telegram voice/audio message
+    │
+    ▼
+Download OGG → sandbox
+    │
+    ▼
+ffmpeg: OGG Opus → WAV 16kHz mono
+    │
+    ▼
+whisper-cli → timestamped text
+    │
+    ▼
+parseWhisperOutput → clean text
+    │
+    ▼
+Agent.call("[vocale] <text>")
+```
+
 ### Database Schema
 
 ```sql
@@ -263,7 +300,7 @@ messages          (id PK, session_id FK, timestamp, prompt, response, duration_m
 attachments       (id PK, message_id FK, media_type, file_id, data BLOB, created_at)
 telegram_sessions (chat_id PK, session_id, updated_at)
 runtime_config    (key PK, value, updated_at)
-scheduled_jobs    (id PK, chat_id, prompt, schedule_type, run_at, interval_ms, created_at, last_run_at, active)
+scheduled_jobs    (id PK, chat_id, prompt, schedule_type, cron_expr, run_at, interval_ms, created_at, last_run_at, active)
 ```
 
 **Indexes:** `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id`, `idx_telegram_sessions_session`, `idx_attachments_message`, `idx_scheduled_jobs_active`, `idx_scheduled_jobs_chat`

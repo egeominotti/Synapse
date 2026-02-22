@@ -10,7 +10,9 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Language**: TypeScript (strict mode, ESNext target)
 - **Database**: SQLite via `bun:sqlite` (WAL mode)
 - **Telegram**: grammy v1.40+
-- **Testing**: bun:test (206 tests, 13 files)
+- **Scheduler**: croner (zero-dep cron library with second-level precision)
+- **Voice**: whisper.cpp via `whisper-cli` (optional, local speech-to-text)
+- **Testing**: bun:test (283 tests, 17 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
@@ -18,7 +20,7 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 ## Architecture
 
 ```
-index.ts / telegram.ts          Entry points
+index.ts / run.ts               Entry points
         │
         ▼
     Agent (src/agent.ts)         Spawns `claude` CLI, retry + timeout
@@ -32,16 +34,20 @@ Database (src/db.ts)             SQLite — sessions, messages, attachments, tel
         ▲
    ┌────┼────────┐
    ▼    ▼        ▼
-RuntimeConfig  ChatQueue  Scheduler   Config + queue + job scheduler
+RuntimeConfig  ChatQueue  Scheduler   Config + queue + croner-based job scheduler
+
+Whisper (src/whisper.ts)         Optional: voice → text via whisper-cli
+AgentIdentity (src/agent-identity.ts)   Matrix-themed visual identity for agents
 ```
 
 ## Project Structure
 
 ```
 index.ts             → REPL entry point
-telegram.ts          → Telegram bot entry point (init, caches, scheduler, startup)
+run.ts               → Telegram bot entry point (init, caches, scheduler, startup)
 src/
   agent.ts           → Claude CLI wrapper (spawn, retry, timeout, vision)
+  agent-identity.ts  → Matrix-themed agent identity generator (names, codes, emojis)
   sandbox.ts         → Sandbox creation, safety rules, file listing, spawn env
   db-core.ts         → Database base class (schema, sessions, messages, attachments, cleanup)
   db.ts              → Database extends DatabaseCore (Telegram sessions, config, jobs)
@@ -49,7 +55,8 @@ src/
   config.ts          → Env-based configuration with range validation
   formatter.ts       → Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  → Runtime configuration manager (Telegram /config)
-  scheduler.ts       → Job scheduler (SQLite-backed, 60s ticker, once/recurring/delay)
+  scheduler.ts       → Job scheduler (croner-powered, once/recurring/delay/cron)
+  whisper.ts         → Optional voice-to-text via whisper-cli (local whisper.cpp)
   history.ts         → Session & message persistence (SQLite-backed)
   repl.ts            → Interactive terminal with slash commands
   repl-commands.ts   → REPL command implementations (pure functions)
@@ -60,18 +67,21 @@ src/
   utils.ts           → Duration formatting helper
   index.ts           → Barrel re-exports
   telegram/
-    handlers.ts      → Message handlers with DRY executeWithRetry pattern
+    handlers.ts      → Message handlers (text, photo, document, voice, audio, edited)
     commands.ts      → Bot commands (/start, /help, /reset, /stats, /config, etc.)
 tests/
   db.test.ts              → Database CRUD, schema, stats, cleanup (25 tests)
   history.test.ts         → HistoryManager (15 tests)
   session-store.test.ts   → SessionStore (10 tests)
-  agent.test.ts           → Parsing, retry logic, args (22 tests)
+  agent.test.ts           → Parsing, retry logic, args (28 tests)
+  agent-identity.test.ts  → Identity generation, formatting, orchestrator (9 tests)
   config.test.ts          → Config loading + range validation (5 tests)
-  runtime-config.test.ts  → RuntimeConfig get/set/reset/validation (21 tests)
+  runtime-config.test.ts  → RuntimeConfig get/set/reset/validation (24 tests)
   formatter.test.ts       → Markdown→HTML conversion + chunking (29 tests)
   chat-queue.test.ts      → Serial queue ordering + concurrency (5 tests)
-  scheduler.test.ts       → parseSchedule + DB CRUD + Scheduler limits (19 tests)
+  scheduler.test.ts       → parseSchedule, toCronExpr, DB CRUD, Scheduler + croner (40 tests)
+  handlers.test.ts        → Free-text schedule parsing (16 tests)
+  whisper.test.ts         → Whisper output parsing (7 tests)
   sandbox.test.ts         → MIME types, spawn env, sandbox creation, file listing (20 tests)
   repl-commands.test.ts   → parseImageArgs, writeMeta, printBanner, printStats (13 tests)
   utils.test.ts           → formatDuration (3 tests)
@@ -85,7 +95,7 @@ tests/
 bun run index.ts
 
 # Run Telegram bot
-bun run telegram.ts
+bun run run.ts
 
 # Run tests
 bun test
@@ -111,6 +121,7 @@ bun install
 - **No Claude SDK**: Agent spawns `claude` CLI with `--print --output-format json` flags
 - **Session continuity**: `--resume <sessionId>` flag resumes conversations
 - **Vision**: Uses `--input-format stream-json` with base64 image data via stdin
+- **Voice-to-text**: Optional whisper.cpp — OGG Opus → ffmpeg → WAV → whisper-cli → text
 - **Retry**: Exponential backoff on transient errors (429, 503, connection resets)
 - **Timeout**: Optional process timeout (default: disabled), kills on exceed
 - **Concurrent I/O**: Reads stdout/stderr in parallel to prevent deadlock
@@ -122,7 +133,8 @@ bun install
 - **HTML formatted output**: Markdown → Telegram HTML conversion with smart chunking and fallback
 - **Edited message support**: Re-processes edited messages through Claude with `[Messaggio modificato]` prefix
 - **Runtime config**: All agent params configurable via Telegram `/config` (admin only)
-- **Job scheduler**: SQLite-backed, 60s ticker, supports once/recurring/delay schedules
+- **Job scheduler**: croner-powered with per-job Cron instances, supports once/recurring/delay/cron
+- **Agent identity**: Matrix-themed names + color emojis distinguish orchestrator from job agents
 - **Sandbox isolation**: Each Agent runs in a temp directory (`/tmp/neo-agent-*`) with CLAUDE.md safety rules
 - **Cross-platform safety rules**: Comprehensive rules prevent destructive operations on Linux, macOS, Windows
 - **Cached spawn env**: `buildSpawnEnv()` cached per token to avoid per-call overhead
@@ -134,13 +146,21 @@ bun install
 - **Modular telegram**: Commands and handlers split into `src/telegram/` for <350 lines per file
 - **Pre-compiled regex**: Formatter regex patterns compiled once at module level, not per call
 - **Sandbox cleanup**: `Agent.cleanup()` removes temp directories on LRU eviction
-- **Async scheduler**: `Bun.sleep` loop instead of `setInterval` — no overlapping ticks
 
 ## Configuration
 
 ### Startup (Environment Variables)
 
 All config via environment variables loaded in `src/config.ts`. Required: `CLAUDE_CODE_OAUTH_TOKEN`. For Telegram bot: also `TELEGRAM_BOT_TOKEN`.
+
+| Variable                  | Required  | Default | Description                                    |
+| ------------------------- | --------- | ------- | ---------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes       | —       | OAuth token for Claude CLI                     |
+| `TELEGRAM_BOT_TOKEN`      | Yes (bot) | —       | Telegram bot token                             |
+| `TELEGRAM_ADMIN_ID`       | No        | —       | Admin chat ID for privileged commands          |
+| `WHISPER_MODEL_PATH`      | No        | —       | Path to whisper.cpp GGML model (enables voice) |
+| `WHISPER_LANGUAGE`        | No        | `it`    | Whisper language code (ISO 639-1)              |
+| `WHISPER_THREADS`         | No        | `4`     | CPU threads for whisper transcription          |
 
 ### Runtime (Telegram /config)
 
@@ -170,12 +190,12 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 ## Database Schema
 
 ```sql
-sessions          (session_id TEXT PK, created_at TEXT, updated_at TEXT)
+sessions          (session_id TEXT PK, chat_id INTEGER, created_at TEXT, updated_at TEXT)
 messages          (id INTEGER PK, session_id TEXT FK, timestamp, prompt, response, duration_ms, input_tokens, output_tokens)
 attachments       (id INTEGER PK, message_id INTEGER FK, media_type TEXT, file_id TEXT, data BLOB, created_at TEXT)
 telegram_sessions (chat_id INTEGER PK, session_id TEXT, updated_at TEXT)
 runtime_config    (key TEXT PK, value TEXT, updated_at TEXT)
-scheduled_jobs    (id INTEGER PK, chat_id INTEGER, prompt TEXT, schedule_type TEXT, run_at TEXT, interval_ms INTEGER, created_at TEXT, last_run_at TEXT, active INTEGER)
+scheduled_jobs    (id INTEGER PK, chat_id INTEGER, prompt TEXT, schedule_type TEXT, run_at TEXT, interval_ms INTEGER, cron_expr TEXT, created_at TEXT, last_run_at TEXT, active INTEGER)
 ```
 
 ## Conventions
@@ -183,7 +203,7 @@ scheduled_jobs    (id INTEGER PK, chat_id INTEGER, prompt TEXT, schedule_type TE
 - Italian UI strings in REPL and Telegram bot
 - Logs go to stderr to keep stdout clean
 - No build step — Bun JIT compiles TypeScript directly
-- Single `grammy` dependency, everything else is Bun-native
+- External binaries spawned via `Bun.spawn()` (claude CLI, whisper-cli)
 - Tests use temp directories with cleanup — no persistent side effects
 - Admin auth via `TELEGRAM_ADMIN_ID` env var
 - Pre-commit hooks: typecheck + lint + format check
