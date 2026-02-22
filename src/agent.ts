@@ -7,7 +7,7 @@
 
 import { existsSync } from "fs"
 import { extname } from "path"
-import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage } from "./types"
+import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage, StreamEvent } from "./types"
 import { logger } from "./logger"
 import { createSandbox, cleanupSandbox, listSandboxFiles, buildSpawnEnv, MIME_TYPES } from "./sandbox"
 
@@ -93,6 +93,11 @@ export class Agent {
     )
   }
 
+  /** Send a text prompt with streaming — emits text events as they arrive. */
+  async callStream(prompt: string, onEvent: (event: StreamEvent) => void): Promise<AgentCallResult> {
+    return this.callWithRetry(() => this.spawnTextStream(prompt, onEvent))
+  }
+
   private async callWithRetry(fn: () => Promise<AgentCallResult>): Promise<AgentCallResult> {
     let lastError: Error | null = null
 
@@ -137,6 +142,127 @@ export class Agent {
       stderr: "pipe",
     })
     return this.raceWithTimeout(proc)
+  }
+
+  /** Spawn claude CLI with stream-json output, emitting text events incrementally. */
+  private async spawnTextStream(prompt: string, onEvent: (event: StreamEvent) => void): Promise<AgentCallResult> {
+    logger.debug("Spawning claude (streaming)", { hasSession: !!this.sessionId, promptLength: prompt.length })
+
+    if (this.config.useDocker) {
+      // Docker doesn't support streaming — fall back to non-streaming
+      return this.spawnViaDocker({ prompt, vision: null })
+    }
+
+    const args = this.buildArgs(prompt, "stream-json")
+    const proc = Bun.spawn(args, {
+      cwd: this.sandboxDir,
+      env: buildSpawnEnv(this.config.token),
+      stdout: "pipe",
+      stderr: "pipe",
+    })
+
+    const startTime = performance.now()
+
+    // Set up timeout
+    let timedOut = false
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
+    if (this.config.timeoutMs > 0) {
+      timeoutHandle = setTimeout(() => {
+        timedOut = true
+        proc.kill()
+      }, this.config.timeoutMs)
+    }
+
+    // Read stderr concurrently (non-blocking)
+    const stderrPromise = new Response(proc.stderr as ReadableStream<Uint8Array>).text()
+
+    // Read stdout line-by-line for streaming events
+    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader()
+    const decoder = new TextDecoder()
+    let buffer = ""
+    let accumulated = ""
+    let finalResult: AgentCallResult | null = null
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split("\n")
+        buffer = lines.pop() ?? "" // keep incomplete line in buffer
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+
+          let obj: Record<string, unknown>
+          try {
+            obj = JSON.parse(trimmed)
+          } catch {
+            continue
+          }
+
+          if (obj.type === "assistant" && typeof obj.message === "object" && obj.message !== null) {
+            // Extract text content from assistant message events
+            const msg = obj.message as Record<string, unknown>
+            if (Array.isArray(msg.content)) {
+              for (const block of msg.content) {
+                if (typeof block === "object" && block !== null && (block as Record<string, unknown>).type === "text") {
+                  const text = (block as Record<string, unknown>).text as string
+                  if (text && text.length > accumulated.length) {
+                    const delta = text.slice(accumulated.length)
+                    accumulated = text
+                    onEvent({ type: "text", text: delta })
+                  }
+                }
+              }
+            }
+          } else if (obj.type === "result") {
+            const parsed = obj as unknown as ClaudeResponse & { type: string }
+            if (parsed.session_id) this.setSessionId(parsed.session_id)
+
+            const tokenUsage: TokenUsage | null = parsed.usage
+              ? { inputTokens: parsed.usage.input_tokens ?? 0, outputTokens: parsed.usage.output_tokens ?? 0 }
+              : null
+
+            const text = parsed.result ?? accumulated
+            const durationMs = Math.round(performance.now() - startTime)
+            finalResult = { text, sessionId: this.sessionId, tokenUsage, durationMs }
+          }
+        }
+      }
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+    }
+
+    if (timedOut) throw new TimeoutError(this.config.timeoutMs)
+
+    const stderrText = await stderrPromise
+    const exitCode = await proc.exited
+    const durationMs = Math.round(performance.now() - startTime)
+
+    if (exitCode !== 0) {
+      const errorMsg = stderrText.trim() || `claude exited with code ${exitCode}`
+      logger.error("Claude process failed", { exitCode, error: errorMsg })
+      throw new Error(errorMsg)
+    }
+
+    if (finalResult) {
+      onEvent({ type: "done", result: finalResult })
+      return finalResult
+    }
+
+    // Fallback: no result event found
+    logger.warn("stream: no result event, returning accumulated text")
+    const fallback: AgentCallResult = {
+      text: accumulated || "",
+      sessionId: this.sessionId,
+      tokenUsage: null,
+      durationMs,
+    }
+    onEvent({ type: "done", result: fallback })
+    return fallback
   }
 
   /** Spawn claude CLI with vision input (direct or Docker). */

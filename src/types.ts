@@ -74,6 +74,9 @@ export interface AgentCallResult {
   durationMs: number
 }
 
+/** Streaming event emitted during agent.callStream() */
+export type StreamEvent = { type: "text"; text: string } | { type: "done"; result: AgentCallResult }
+
 /** Slash command handler signature */
 export type SlashCommandHandler = (args: string) => Promise<boolean>
 

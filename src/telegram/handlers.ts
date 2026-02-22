@@ -222,6 +222,98 @@ async function executeWithRetry(
 }
 
 // ---------------------------------------------------------------------------
+// Streaming: live message updates while Claude generates
+// ---------------------------------------------------------------------------
+
+const STREAM_EDIT_INTERVAL = 1500 // ms between edits (Telegram rate limit)
+const STREAM_MAX_DISPLAY = 4000 // chars per message (margin from 4096 limit)
+
+async function executeWithStreaming(ctx: Context, chatId: number, prompt: string, deps: TelegramDeps): Promise<void> {
+  const execute = async (agent: Agent): Promise<void> => {
+    const before = snapshotSandbox(agent)
+
+    // Send initial placeholder message
+    const sentMsg = await ctx.reply("⏳")
+    const msgId = sentMsg.message_id
+
+    let accumulated = ""
+    let lastEditAt = 0
+
+    const result = await agent.callStream(prompt, (event) => {
+      if (event.type === "text") {
+        accumulated += event.text
+        const now = Date.now()
+        if (now - lastEditAt >= STREAM_EDIT_INTERVAL && accumulated.length > 0) {
+          lastEditAt = now
+          const display =
+            accumulated.length > STREAM_MAX_DISPLAY ? "..." + accumulated.slice(-(STREAM_MAX_DISPLAY - 3)) : accumulated
+          ctx.api.editMessageText(chatId, msgId, display).catch(() => {})
+        }
+      }
+    })
+
+    // Final formatted message
+    const responseText = accumulated || result.text
+    const meta = buildMeta(result)
+    const { chunks, parseMode } = formatForTelegram(responseText, meta)
+
+    if (chunks.length === 1) {
+      // Single chunk → edit existing message with formatted HTML
+      try {
+        await ctx.api.editMessageText(chatId, msgId, chunks[0], parseMode ? { parse_mode: parseMode } : {})
+      } catch {
+        try {
+          await ctx.api.editMessageText(chatId, msgId, chunks[0])
+        } catch {
+          /* already has the plain text from streaming */
+        }
+      }
+    } else {
+      // Multiple chunks → delete streaming message, send formatted chunks
+      await ctx.api.deleteMessage(chatId, msgId).catch(() => {})
+      for (const chunk of chunks) {
+        try {
+          await ctx.reply(chunk, parseMode ? { parse_mode: parseMode } : {})
+        } catch {
+          await ctx.reply(chunk)
+        }
+      }
+    }
+
+    // History, sandbox files, persist
+    const history = deps.getHistory(chatId, agent)
+    await history.addMessage({
+      timestamp: new Date().toISOString(),
+      prompt,
+      response: responseText,
+      durationMs: result.durationMs,
+      tokenUsage: result.tokenUsage,
+    })
+
+    await sendSandboxFiles(ctx, agent, before)
+    await deps.persistSession(chatId, agent)
+  }
+
+  try {
+    await execute(deps.getAgent(chatId))
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (isSessionError(msg)) {
+      logger.debug("Stale session, resetting", { chatId, error: msg })
+      try {
+        await execute(resetAgentSession(chatId, deps))
+      } catch (retryErr) {
+        const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
+        logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
+        await ctx.reply(`❌ Errore: ${retryMsg}`)
+      }
+    } else {
+      await ctx.reply(`❌ Errore: ${msg}`)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Register message listeners
 // ---------------------------------------------------------------------------
 
@@ -231,8 +323,8 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     if (prompt.startsWith("/")) return
 
     await deps.chatQueue.enqueue(ctx.chat.id, async () => {
-      logger.info("Text message", { chatId: ctx.chat.id, length: prompt.length })
-      await withTyping(ctx, () => executeWithRetry(ctx, ctx.chat.id, (agent) => agent.call(prompt), prompt, deps))
+      logger.info("Text message (streaming)", { chatId: ctx.chat.id, length: prompt.length })
+      await executeWithStreaming(ctx, ctx.chat.id, prompt, deps)
     })
   })
 
