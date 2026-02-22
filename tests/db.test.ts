@@ -234,6 +234,68 @@ describe("Telegram sessions", () => {
 })
 
 // ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
+
+describe("cleanupOldSessions", () => {
+  it("deletes sessions older than N days", () => {
+    // Insert a session with updated_at 100 days ago
+    const old = new Date(Date.now() - 100 * 86_400_000).toISOString()
+    db.db.run("INSERT INTO sessions (session_id, created_at, updated_at) VALUES (?, ?, ?)", ["old-sess", old, old])
+    db.db.run("INSERT INTO messages (session_id, timestamp, prompt, response, duration_ms) VALUES (?, ?, ?, ?, ?)", [
+      "old-sess",
+      old,
+      "hello",
+      "world",
+      100,
+    ])
+
+    // Insert a recent session
+    db.upsertSession("recent-sess")
+    db.insertMessage("recent-sess", new Date().toISOString(), "hi", "ho", 50, 0, 0)
+
+    const deleted = db.cleanupOldSessions(90)
+    expect(deleted).toBe(1)
+
+    // Old session gone
+    expect(db.getSession("old-sess")).toBeNull()
+    expect(db.getMessages("old-sess")).toEqual([])
+
+    // Recent session intact
+    expect(db.getSession("recent-sess")).not.toBeNull()
+    expect(db.getMessages("recent-sess").length).toBe(1)
+  })
+
+  it("returns 0 when nothing to clean", () => {
+    expect(db.cleanupOldSessions(90)).toBe(0)
+  })
+})
+
+describe("cleanupOrphanTelegramSessions", () => {
+  it("deletes telegram sessions with no matching session", () => {
+    // Create a valid session + telegram mapping
+    db.upsertSession("valid-sess")
+    db.setTelegramSession(100, "valid-sess")
+
+    // Insert orphan telegram session (no matching session row)
+    db.db.run("INSERT INTO telegram_sessions (chat_id, session_id, updated_at) VALUES (?, ?, ?)", [
+      999,
+      "ghost-sess",
+      new Date().toISOString(),
+    ])
+
+    const deleted = db.cleanupOrphanTelegramSessions()
+    expect(deleted).toBe(1)
+
+    // Orphan gone
+    expect(db.getTelegramSession(999)).toBeUndefined()
+
+    // Valid mapping intact
+    expect(db.getTelegramSession(100)).toBe("valid-sess")
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 

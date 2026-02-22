@@ -5,11 +5,11 @@
  * Supports both text prompts and vision (image + text) via stream-json input.
  */
 
-import { existsSync, mkdtempSync, readdirSync, statSync, writeFileSync } from "fs"
-import { extname, join, relative } from "path"
-import { tmpdir } from "os"
+import { existsSync } from "fs"
+import { extname } from "path"
 import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage } from "./types"
 import { logger } from "./logger"
+import { createSandbox, listSandboxFiles, buildSpawnEnv, MIME_TYPES } from "./sandbox"
 
 /** Errors that are considered transient and safe to retry */
 const TRANSIENT_PATTERNS = [
@@ -34,35 +34,9 @@ export class TimeoutError extends Error {
 }
 
 export function isTransientError(err: Error): boolean {
-  if (err instanceof TimeoutError) return false // never retry timeouts
+  if (err instanceof TimeoutError) return false
   const lower = err.message.toLowerCase()
   return TRANSIENT_PATTERNS.some((p) => lower.includes(p.toLowerCase()))
-}
-
-/** Supported image MIME types for vision */
-const MIME_TYPES: Record<string, string> = {
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".gif": "image/gif",
-  ".webp": "image/webp",
-}
-
-/** Build spawn env: inherit Bun.env, strip CLAUDECODE, inject token.
- *  Cached per token — avoids rebuilding the env object on every spawn call. */
-let _cachedEnv: Record<string, string> | null = null
-let _cachedToken: string | null = null
-
-export function buildSpawnEnv(token: string): Record<string, string> {
-  if (_cachedEnv && _cachedToken === token) return _cachedEnv
-  const { CLAUDECODE: _stripped, ...rest } = Bun.env
-  _cachedEnv = Object.fromEntries(
-    Object.entries({ ...rest, CLAUDE_CODE_OAUTH_TOKEN: token }).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined
-    )
-  )
-  _cachedToken = token
-  return _cachedEnv
 }
 
 export class Agent {
@@ -73,143 +47,12 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config
-    this.sandboxDir = mkdtempSync(join(tmpdir(), "neo-agent-"))
-    this.writeSandboxRules()
+    this.sandboxDir = createSandbox()
   }
 
-  /** Write CLAUDE.md rules in the sandbox to constrain Claude's behavior */
-  private writeSandboxRules(): void {
-    const rules = [
-      "# CLAUDE.md",
-      "",
-      "## Safety Rules — MANDATORY",
-      "",
-      "You are running in an isolated sandbox. These rules are NON-NEGOTIABLE.",
-      "Violations can cause irreversible damage to the host system.",
-      "",
-      "## 1. FILESYSTEM — FORBIDDEN PATHS",
-      "",
-      "**NEVER read, write, delete, or modify files outside this sandbox.**",
-      "",
-      "**Linux protected paths:**",
-      "- `/etc`, `/usr`, `/bin`, `/sbin`, `/lib`, `/lib64`, `/boot`, `/opt`, `/var`, `/root`, `/proc`, `/sys`, `/dev`",
-      "",
-      "**macOS protected paths:**",
-      "- `/System`, `/Library`, `/Applications`, `/usr`, `/bin`, `/sbin`, `/etc`, `/var`, `/private`, `/cores`",
-      "",
-      "**Windows protected paths:**",
-      "- `C:\\Windows`, `C:\\Program Files`, `C:\\Program Files (x86)`, `C:\\ProgramData`",
-      "- `C:\\Users\\<user>\\AppData`, `C:\\Recovery`, `C:\\$Recycle.Bin`",
-      "",
-      "**User home protected paths (all platforms):**",
-      "- `~`, `$HOME`, `%USERPROFILE%` — never delete or recursively modify",
-      "- `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube`, `~/.config`, `~/.local`",
-      "- `~/.bashrc`, `~/.zshrc`, `~/.profile`, `~/.bash_profile`",
-      "- Any `.env`, `.env.*`, `credentials`, `secrets`, `token` files",
-      "",
-      "## 2. DESTRUCTIVE COMMANDS — FORBIDDEN",
-      "",
-      "**Never execute these commands or any variation:**",
-      "",
-      "File destruction:",
-      "- `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, `rm -rf /*`",
-      "- `del /s /q C:\\`, `rd /s /q C:\\`",
-      "- Any recursive delete (`rm -rf`, `rd /s`) targeting paths outside this sandbox",
-      "",
-      "Disk/partition:",
-      "- `mkfs`, `fdisk`, `dd` (on block devices), `format`, `diskpart`, `parted`",
-      "",
-      "System control:",
-      "- `shutdown`, `reboot`, `halt`, `poweroff`, `init 0`, `init 6`",
-      "- `shutdown /s`, `shutdown /r` (Windows)",
-      "",
-      "Process killing:",
-      "- `kill -9 1`, `killall` (system processes), `pkill` (system processes)",
-      "- `taskkill /f` on: svchost, csrss, winlogon, lsass, wininit, smss",
-      "",
-      "Privilege escalation:",
-      "- `sudo`, `su`, `doas`, `runas`, `pkexec`",
-      "- `chmod 777`, `chmod +s`, `chown root` on any system files",
-      "",
-      "Registry/config:",
-      "- `reg delete`, `regedit` (Windows registry)",
-      "- `defaults write` on system domains (macOS)",
-      "",
-      "Service management:",
-      "- `systemctl stop/disable`, `launchctl unload`, `sc stop` on system services",
-      "- `crontab -r` (delete all cron jobs)",
-      "",
-      "Network/firewall:",
-      "- `iptables -F`, `ufw disable`, `pfctl -d` (flush/disable firewalls)",
-      "- `route del`, `ip route flush` (delete network routes)",
-      "",
-      "Container/VM (if accessible):",
-      "- `docker rm -f`, `docker system prune -af`, `docker rmi -f`",
-      "- `docker run --privileged`, `docker run -v /:/host`",
-      "",
-      "Remote code execution:",
-      "- `curl | sh`, `curl | bash`, `wget -O- | sh` (piped execution)",
-      "- `eval` on untrusted remote content",
-      "",
-      "Package managers (global installs):",
-      "- `npm install -g`, `pip install` (system-wide), `gem install` (system)",
-      "- `apt remove`, `brew uninstall`, `pacman -R` (system packages)",
-      "",
-      "Symlink attacks:",
-      "- Do NOT create symlinks pointing outside this sandbox directory",
-      "",
-      "## 3. ALLOWED OPERATIONS",
-      "",
-      "- Create, read, write, delete files ONLY within this sandbox: `" + this.sandboxDir + "`",
-      "- Run read-only commands: `ls`, `cat`, `head`, `tail`, `wc`, `df`, `uname`, `whoami`, `date`, `dir`",
-      "- Network read operations: `curl`, `wget`, `fetch` (GET requests for data retrieval)",
-      "- Language REPLs within sandbox: `python`, `node`, `bun` (operating on sandbox files only)",
-      "",
-      "## 4. WHEN IN DOUBT",
-      "",
-      "If a user asks you to perform a potentially dangerous operation:",
-      "1. REFUSE the operation",
-      "2. Explain what was requested and why it is dangerous",
-      "3. Suggest a safe alternative if possible",
-      "",
-      "**Remember: you can always create and work on files in this sandbox freely.**",
-      "**You MUST NEVER operate on files outside it.**",
-    ].join("\n")
-
-    writeFileSync(join(this.sandboxDir, "CLAUDE.md"), rules)
-  }
-
-  /**
-   * List all user-created files in the sandbox (excludes CLAUDE.md).
-   * Returns relative paths with their modification times.
-   */
+  /** List user-created files in the sandbox (excludes CLAUDE.md) */
   listSandboxFiles(): Array<{ path: string; mtimeMs: number }> {
-    const results: Array<{ path: string; mtimeMs: number }> = []
-    const walk = (dir: string): void => {
-      let names: string[]
-      try {
-        names = readdirSync(dir) as string[]
-      } catch {
-        return
-      }
-      for (const name of names) {
-        const fullPath = join(dir, name)
-        try {
-          const stat = statSync(fullPath)
-          if (stat.isDirectory()) {
-            walk(fullPath)
-          } else if (stat.isFile()) {
-            const rel = relative(this.sandboxDir, fullPath)
-            if (rel === "CLAUDE.md") continue
-            results.push({ path: rel, mtimeMs: stat.mtimeMs })
-          }
-        } catch {
-          /* file may have been deleted between readdir and stat */
-        }
-      }
-    }
-    walk(this.sandboxDir)
-    return results
+    return listSandboxFiles(this.sandboxDir)
   }
 
   getSessionId(): string | null {
@@ -226,10 +69,7 @@ export class Agent {
     return this.callWithRetry(() => this.spawnText(prompt))
   }
 
-  /**
-   * Send an image + optional text prompt.
-   * Uses --input-format stream-json to send a vision content block via stdin.
-   */
+  /** Send an image + optional text prompt via stream-json. */
   async callWithImage(imagePath: string, prompt: string): Promise<AgentCallResult> {
     if (!existsSync(imagePath)) throw new Error(`File non trovato: ${imagePath}`)
     const ext = extname(imagePath).toLowerCase()
@@ -342,7 +182,6 @@ export class Agent {
   /**
    * Spawn claude inside an isolated Docker container.
    * Token is passed via stdin as JSON — never appears in process args or env.
-   * No filesystem mounts: image data is passed inline as base64.
    */
   private async spawnViaDocker(payload: {
     prompt: string
@@ -351,11 +190,11 @@ export class Agent {
     const dockerArgs = [
       "docker",
       "run",
-      "--rm", // auto-remove container after exit
-      "--interactive", // keep stdin open
-      "--network=host", // needed for claude CLI to reach Anthropic API
-      "--memory=512m", // cap memory per container
-      "--cpus=1", // cap CPU per container
+      "--rm",
+      "--interactive",
+      "--network=host",
+      "--memory=512m",
+      "--cpus=1",
       this.config.dockerImage,
     ]
 
@@ -363,10 +202,8 @@ export class Agent {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      // Do NOT pass env with token here — token goes via stdin payload
     })
 
-    // Send the payload; token never touches docker args or env
     const stdinPayload = JSON.stringify({
       token: this.config.token,
       prompt: payload.prompt,
@@ -381,16 +218,11 @@ export class Agent {
 
   /**
    * Race a spawned process against the configured timeout.
-   * Kills the process if the timeout fires (no orphans).
    * Reads stdout and stderr CONCURRENTLY to prevent pipe deadlock.
    */
   private async raceWithTimeout(proc: ReturnType<typeof Bun.spawn>): Promise<AgentCallResult> {
     const startTime = performance.now()
 
-    // Drain both pipes concurrently — if stderr fills (>512KB on macOS) while
-    // we sequentially wait for stdout, the child blocks and deadlocks.
-    // Cast required because Bun's generic spawn return type is a union that
-    // includes `number` for non-piped streams; we always set stdout/stderr:"pipe".
     const readText = (s: unknown): Promise<string> => new Response(s as ReadableStream<Uint8Array>).text()
     const readPromise = Promise.all([readText(proc.stdout), readText(proc.stderr)])
 
@@ -429,7 +261,6 @@ export class Agent {
     if (this.sessionId) {
       args.push("--resume", this.sessionId)
     } else if (this.config.systemPrompt) {
-      // Only inject system prompt on new sessions — resumed sessions already have it baked in
       args.push("--system-prompt", this.config.systemPrompt)
     }
     if (inlinePrompt !== null) args.push(inlinePrompt)
@@ -440,13 +271,14 @@ export class Agent {
     const trimmed = rawStdout.trim()
     const lines = trimmed.split("\n").filter((l) => l.trim())
 
-    // stream-json output: multiple newline-delimited JSON events — find the "result" event
+    // stream-json: multiple newline-delimited JSON events — find the "result" event
     if (lines.length > 1) {
       for (const line of lines) {
         let obj: Record<string, unknown>
         try {
           obj = JSON.parse(line)
         } catch {
+          logger.debug("Skipping non-JSON line in stream output", { line: line.slice(0, 100) })
           continue
         }
         if (obj.type !== "result") continue
@@ -467,7 +299,7 @@ export class Agent {
       return { text: trimmed, sessionId: this.sessionId, tokenUsage: null }
     }
 
-    // Standard json output: single JSON object
+    // Standard json: single JSON object
     let parsed: ClaudeResponse
     try {
       parsed = JSON.parse(trimmed)

@@ -10,7 +10,7 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Language**: TypeScript (strict mode, ESNext target)
 - **Database**: SQLite via `bun:sqlite` (WAL mode)
 - **Telegram**: grammy v1.40+
-- **Testing**: bun:test (167 tests, 11 files)
+- **Testing**: bun:test (206 tests, 13 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
@@ -39,33 +39,41 @@ RuntimeConfig  ChatQueue  Scheduler   Config + queue + job scheduler
 
 ```
 index.ts             → REPL entry point
-telegram.ts          → Telegram bot entry point (commands, queue, formatter)
+telegram.ts          → Telegram bot entry point (init, caches, scheduler, startup)
 src/
-  agent.ts           → Claude CLI wrapper (spawn, retry, timeout, vision, sandbox)
+  agent.ts           → Claude CLI wrapper (spawn, retry, timeout, vision)
+  sandbox.ts         → Sandbox creation, safety rules, file listing, spawn env
+  db-core.ts         → Database base class (schema, sessions, messages, attachments, cleanup)
+  db.ts              → Database extends DatabaseCore (Telegram sessions, config, jobs)
   chat-queue.ts      → Per-chat serial message queue (prevents race conditions)
-  config.ts          → Env-based configuration (startup defaults)
+  config.ts          → Env-based configuration with range validation
   formatter.ts       → Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  → Runtime configuration manager (Telegram /config)
   scheduler.ts       → Job scheduler (SQLite-backed, 60s ticker, once/recurring/delay)
-  db.ts              → SQLite database layer (bun:sqlite, WAL mode)
   history.ts         → Session & message persistence (SQLite-backed)
   repl.ts            → Interactive terminal with slash commands
+  repl-commands.ts   → REPL command implementations (pure functions)
   session-store.ts   → Telegram chatId → sessionId mapping (SQLite-backed)
   types.ts           → All TypeScript interfaces + runtime config types
   logger.ts          → Structured logging to stderr
   spinner.ts         → Terminal spinner animation
   utils.ts           → Duration formatting helper
   index.ts           → Barrel re-exports
+  telegram/
+    handlers.ts      → Message handlers with DRY executeWithRetry pattern
+    commands.ts      → Bot commands (/start, /help, /reset, /stats, /config, etc.)
 tests/
-  db.test.ts              → Database CRUD, schema, stats (22 tests)
+  db.test.ts              → Database CRUD, schema, stats, cleanup (25 tests)
   history.test.ts         → HistoryManager (15 tests)
   session-store.test.ts   → SessionStore (10 tests)
   agent.test.ts           → Parsing, retry logic, args (22 tests)
-  config.test.ts          → Config loading (2 tests)
+  config.test.ts          → Config loading + range validation (5 tests)
   runtime-config.test.ts  → RuntimeConfig get/set/reset/validation (21 tests)
   formatter.test.ts       → Markdown→HTML conversion + chunking (29 tests)
   chat-queue.test.ts      → Serial queue ordering + concurrency (5 tests)
   scheduler.test.ts       → parseSchedule + DB CRUD + Scheduler limits (19 tests)
+  sandbox.test.ts         → MIME types, spawn env, sandbox creation, file listing (20 tests)
+  repl-commands.test.ts   → parseImageArgs, writeMeta, printBanner, printStats (13 tests)
   utils.test.ts           → formatDuration (3 tests)
   logger.test.ts          → Logger levels and output (9 tests)
 ```
@@ -118,6 +126,11 @@ bun install
 - **Sandbox isolation**: Each Agent runs in a temp directory (`/tmp/neo-agent-*`) with CLAUDE.md safety rules
 - **Cross-platform safety rules**: Comprehensive rules prevent destructive operations on Linux, macOS, Windows
 - **Cached spawn env**: `buildSpawnEnv()` cached per token to avoid per-call overhead
+- **Config range validation**: Env vars clamped to safe ranges (timeout 5s–600s, retries 0–10)
+- **Photo size check**: Downloads checked against Content-Length before buffering (max 20 MB)
+- **Session cleanup**: Old sessions (>90 days) and orphan mappings cleaned at startup
+- **DRY handlers**: `executeWithRetry()` pattern handles snapshot/call/history/format/retry in one place
+- **Modular telegram**: Commands and handlers split into `src/telegram/` for <350 lines per file
 
 ## Configuration
 

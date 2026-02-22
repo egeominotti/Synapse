@@ -75,4 +75,54 @@ describe("loadConfig", () => {
     expect(config.dockerImage).toBe("my-image:v2")
     expect(config.systemPrompt).toBe("Be concise")
   })
+
+  it("clamps values below minimum", async () => {
+    Bun.env.CLAUDE_CODE_OAUTH_TOKEN = "tok"
+    Bun.env.CLAUDE_AGENT_TIMEOUT_MS = "100"
+    Bun.env.CLAUDE_AGENT_MAX_RETRIES = "-1"
+    Bun.env.CLAUDE_AGENT_RETRY_DELAY_MS = "10"
+
+    const { loadConfig } = await import("../src/config")
+    const config = loadConfig()
+
+    expect(config.timeoutMs).toBe(5_000)
+    expect(config.maxRetries).toBe(0)
+    expect(config.initialRetryDelayMs).toBe(100)
+  })
+
+  it("clamps values above maximum", async () => {
+    Bun.env.CLAUDE_CODE_OAUTH_TOKEN = "tok"
+    Bun.env.CLAUDE_AGENT_TIMEOUT_MS = "9999999"
+    Bun.env.CLAUDE_AGENT_MAX_RETRIES = "50"
+    Bun.env.CLAUDE_AGENT_RETRY_DELAY_MS = "100000"
+
+    const { loadConfig } = await import("../src/config")
+    const config = loadConfig()
+
+    expect(config.timeoutMs).toBe(600_000)
+    expect(config.maxRetries).toBe(10)
+    expect(config.initialRetryDelayMs).toBe(30_000)
+  })
+
+  it("skipPermissions defaults to true, disabled only with '0'", async () => {
+    Bun.env.CLAUDE_CODE_OAUTH_TOKEN = "tok"
+
+    const { loadConfig } = await import("../src/config")
+
+    // Default (unset) → true
+    delete Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS
+    expect(loadConfig().skipPermissions).toBe(true)
+
+    // Explicit "1" → true
+    Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS = "1"
+    expect(loadConfig().skipPermissions).toBe(true)
+
+    // "0" → false
+    Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS = "0"
+    expect(loadConfig().skipPermissions).toBe(false)
+
+    // Random string → false (only "1" is true)
+    Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS = "true"
+    expect(loadConfig().skipPermissions).toBe(false)
+  })
 })

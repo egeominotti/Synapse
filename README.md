@@ -17,7 +17,7 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 - **Docker Isolation** — Optional containerized execution with resource limits
 - **Job Scheduler** — Schedule prompts: `at 18:00`, `every 09:00`, `in 30m` (SQLite-backed, 60s ticker)
 - **Sandbox Isolation** — Each Agent runs in `/tmp/neo-agent-*` with cross-platform safety rules
-- **Test Suite** — 167 tests across 11 files (bun:test)
+- **Test Suite** — 206 tests across 13 files (bun:test)
 - **CI/CD** — GitHub Actions pipeline + Husky pre-commit hooks (typecheck, lint, format)
 
 ## Requirements
@@ -133,7 +133,7 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 ### Development
 
 ```bash
-bun test              # Run 167 tests
+bun test              # Run 206 tests
 bun run typecheck     # TypeScript check
 bun run lint          # ESLint
 bun run format:check  # Prettier check
@@ -188,33 +188,41 @@ bun run format        # Auto-format
 
 ```
 index.ts             REPL entry point — wires Agent + HistoryManager + Repl
-telegram.ts          Telegram bot — queue, formatter, scheduler, /config, /export, /ping
+telegram.ts          Telegram bot entry point (init, caches, scheduler, startup)
 src/
-  agent.ts           Claude CLI wrapper (spawn, retry, timeout, JSON/stream, sandbox)
+  agent.ts           Claude CLI wrapper (spawn, retry, timeout, vision)
+  sandbox.ts         Sandbox creation, safety rules, file listing, spawn env
+  db-core.ts         Database base class (schema, sessions, messages, attachments, cleanup)
+  db.ts              Database extends DatabaseCore (Telegram sessions, config, jobs)
   chat-queue.ts      Per-chat serial message queue (prevents race conditions)
-  config.ts          Environment-based configuration with defaults
+  config.ts          Environment-based configuration with range validation
   formatter.ts       Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  Runtime config manager (validate, persist, apply via /config)
   scheduler.ts       Job scheduler (SQLite-backed, 60s ticker, once/recurring/delay)
-  db.ts              SQLite layer (bun:sqlite, WAL mode, schema, CRUD, indexes)
   history.ts         Session & message persistence (SQLite-backed)
   repl.ts            Interactive terminal with 8 slash commands
+  repl-commands.ts   REPL command implementations (pure functions)
   session-store.ts   Telegram chatId → sessionId mapping (SQLite-backed)
   types.ts           All TypeScript interfaces (AgentConfig, RuntimeConfigKey, etc.)
   logger.ts          Structured logging to stderr (4 levels, session context)
   spinner.ts         Braille terminal spinner animation
   utils.ts           Duration formatting helper
   index.ts           Barrel re-exports
+  telegram/
+    handlers.ts      Message handlers with DRY executeWithRetry pattern
+    commands.ts      Bot commands (/start, /help, /reset, /stats, /config, etc.)
 tests/
-  db.test.ts              22 tests — schema, CRUD, stats, Telegram sessions
+  db.test.ts              25 tests — schema, CRUD, stats, cleanup
   history.test.ts         15 tests — init, addMessage, loadSession, stats
   session-store.test.ts   10 tests — load, get, set, delete, persistence
   agent.test.ts           22 tests — parseResponse, TimeoutError, buildArgs
-  config.test.ts           2 tests — defaults, custom env vars
+  config.test.ts           5 tests — defaults, env vars, range validation
   runtime-config.test.ts  21 tests — get/set, validation, reset, persistence
   formatter.test.ts       29 tests — Markdown→HTML conversion, chunking
   chat-queue.test.ts       5 tests — serial ordering, concurrency, error recovery
   scheduler.test.ts       19 tests — parseSchedule, DB CRUD, Scheduler limits
+  sandbox.test.ts         20 tests — MIME types, spawn env, sandbox, file listing
+  repl-commands.test.ts   13 tests — parseImageArgs, writeMeta, printBanner, printStats
   utils.test.ts            3 tests — formatDuration
   logger.test.ts           9 tests — levels, filtering, session ID
 ```

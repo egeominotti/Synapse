@@ -1,5 +1,6 @@
 import { describe, it, expect } from "bun:test"
-import { Agent, TimeoutError, isTransientError, buildSpawnEnv } from "../src/agent"
+import { Agent, TimeoutError, isTransientError } from "../src/agent"
+import { buildSpawnEnv } from "../src/sandbox"
 import type { AgentConfig } from "../src/types"
 
 const baseConfig: AgentConfig = {

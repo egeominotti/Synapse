@@ -6,6 +6,8 @@
  * Prevents race conditions on Claude sessions (which are not concurrent-safe).
  */
 
+import { logger } from "./logger"
+
 type Task = () => Promise<void>
 
 export class ChatQueue {
@@ -21,8 +23,8 @@ export class ChatQueue {
 
     const next = previous
       .then(task)
-      .catch(() => {
-        /* errors handled inside the task */
+      .catch((err) => {
+        logger.error("ChatQueue task failed", { chatId, error: String(err) })
       })
       .finally(() => {
         // Clean up if this is still the last task in the chain
