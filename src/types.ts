@@ -83,3 +83,33 @@ export interface SlashCommand {
   description: string
   handler: SlashCommandHandler
 }
+
+// ---------------------------------------------------------------------------
+// Runtime configuration
+// ---------------------------------------------------------------------------
+
+/** Keys that can be configured at runtime via Telegram */
+export type RuntimeConfigKey =
+  | "system_prompt"
+  | "timeout_ms"
+  | "max_retries"
+  | "retry_delay_ms"
+  | "skip_permissions"
+  | "log_level"
+  | "docker"
+  | "docker_image"
+
+/** Definition of a runtime-configurable parameter */
+export interface ConfigDefinition {
+  key: RuntimeConfigKey
+  type: "string" | "number" | "boolean"
+  description: string
+  /** Default value (from env or hardcoded) — set at load time */
+  defaultValue: string
+  /** Minimum value for numbers */
+  min?: number
+  /** Maximum value for numbers */
+  max?: number
+  /** Allowed values for enums (e.g. log levels) */
+  enum?: string[]
+}

@@ -22,11 +22,11 @@ export class HistoryManager {
     logger.info("Session initialized", { sessionId: sessionId.slice(0, 8) })
   }
 
-  /** Add a message exchange to the current session */
-  async addMessage(message: ConversationMessage): Promise<void> {
-    if (!this.currentSessionId) return
+  /** Add a message exchange to the current session. Returns the message ID. */
+  async addMessage(message: ConversationMessage): Promise<number | null> {
+    if (!this.currentSessionId) return null
 
-    this.db.insertMessage(
+    return this.db.insertMessage(
       this.currentSessionId,
       message.timestamp,
       message.prompt,
@@ -35,6 +35,11 @@ export class HistoryManager {
       message.tokenUsage?.inputTokens ?? 0,
       message.tokenUsage?.outputTokens ?? 0
     )
+  }
+
+  /** Attach an image to a message */
+  addAttachment(messageId: number, mediaType: string, data: Buffer, fileId?: string): void {
+    this.db.insertAttachment(messageId, mediaType, data, fileId)
   }
 
   /** Get session statistics (computed from DB aggregates) */
@@ -87,7 +92,8 @@ export class HistoryManager {
       return null
     }
 
-    const messages = this.db.getMessages(session.session_id).map((row) => ({
+    // Load only the last 200 messages to avoid unbounded memory usage on huge sessions
+    const messages = this.db.getRecentMessages(session.session_id, 200).map((row) => ({
       timestamp: row.timestamp,
       prompt: row.prompt,
       response: row.response,

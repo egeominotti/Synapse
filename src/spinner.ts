@@ -23,9 +23,9 @@ export class Spinner {
     process.stdout.write("\x1b[?25l")
 
     this.timer = setInterval(() => {
-      const frame = FRAMES[this.frameIndex % FRAMES.length]
+      const frame = FRAMES[this.frameIndex]
       process.stdout.write(`\r\x1b[90m${frame} ${this.message}\x1b[0m`)
-      this.frameIndex++
+      this.frameIndex = (this.frameIndex + 1) % FRAMES.length
     }, FRAME_INTERVAL_MS)
   }
 

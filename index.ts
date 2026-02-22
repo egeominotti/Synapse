@@ -63,10 +63,7 @@ async function main(): Promise<void> {
     // Restore cursor visibility
     process.stdout.write("\x1b[?25h")
 
-    // Close database
-    db.close()
-
-    // Print final stats
+    // Print final stats (BEFORE closing DB — getStats needs an open connection)
     const stats = history.getStats()
     if (stats && stats.totalMessages > 0) {
       process.stdout.write(
@@ -74,6 +71,9 @@ async function main(): Promise<void> {
         `durata totale ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
       )
     }
+
+    // Close database after reading stats
+    db.close()
 
     process.stdout.write("\x1b[1;36mArrivederci.\x1b[0m\n\n")
     process.exit(0)

@@ -53,8 +53,26 @@ export class Database {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS runtime_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        media_type TEXT NOT NULL,
+        file_id TEXT,
+        data BLOB NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
       CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id DESC);
+      CREATE INDEX IF NOT EXISTS idx_telegram_sessions_session ON telegram_sessions(session_id);
+      CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
     `)
   }
 
@@ -90,13 +108,15 @@ export class Database {
     durationMs: number,
     inputTokens: number,
     outputTokens: number
-  ): void {
+  ): number {
     this.db.run(
       `INSERT INTO messages (session_id, timestamp, prompt, response, duration_ms, input_tokens, output_tokens)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [sessionId, timestamp, prompt, response, durationMs, inputTokens, outputTokens]
     )
     this.touchSession(sessionId)
+    const row = this.db.query("SELECT last_insert_rowid() as id").get() as { id: number }
+    return row.id
   }
 
   getMessages(sessionId: string): Array<{
@@ -186,7 +206,7 @@ export class Database {
   // Session listing
   // ---------------------------------------------------------------------------
 
-  listSessions(): Array<{
+  listSessions(limit = 100): Array<{
     sessionId: string
     createdAt: string
     messageCount: number
@@ -198,9 +218,10 @@ export class Database {
            FROM sessions s
            LEFT JOIN messages m ON m.session_id = s.session_id
            GROUP BY s.session_id
-           ORDER BY s.updated_at DESC`
+           ORDER BY s.updated_at DESC
+           LIMIT ?`
         )
-        .all() as Array<{
+        .all(limit) as Array<{
           session_id: string
           created_at: string
           message_count: number
@@ -265,6 +286,87 @@ export class Database {
   countTelegramSessions(): number {
     const row = this.db.query("SELECT COUNT(*) as count FROM telegram_sessions").get() as { count: number }
     return row.count
+  }
+
+  // ---------------------------------------------------------------------------
+  // Attachments (images)
+  // ---------------------------------------------------------------------------
+
+  insertAttachment(messageId: number, mediaType: string, data: Buffer, fileId?: string): void {
+    this.db.run(
+      `INSERT INTO attachments (message_id, media_type, file_id, data, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [messageId, mediaType, fileId ?? null, data, new Date().toISOString()]
+    )
+  }
+
+  getAttachments(messageId: number): Array<{
+    id: number
+    media_type: string
+    file_id: string | null
+    data: Buffer
+  }> {
+    return this.db
+      .query("SELECT id, media_type, file_id, data FROM attachments WHERE message_id = ?")
+      .all(messageId) as Array<{
+        id: number
+        media_type: string
+        file_id: string | null
+        data: Buffer
+      }>
+  }
+
+  getAttachmentsBySession(sessionId: string): Array<{
+    message_id: number
+    media_type: string
+    file_id: string | null
+  }> {
+    return this.db
+      .query(
+        `SELECT a.message_id, a.media_type, a.file_id
+         FROM attachments a
+         JOIN messages m ON m.id = a.message_id
+         WHERE m.session_id = ?
+         ORDER BY a.id ASC`
+      )
+      .all(sessionId) as Array<{
+        message_id: number
+        media_type: string
+        file_id: string | null
+      }>
+  }
+
+  // ---------------------------------------------------------------------------
+  // Runtime config
+  // ---------------------------------------------------------------------------
+
+  getConfig(key: string): string | null {
+    const row = this.db
+      .query("SELECT value FROM runtime_config WHERE key = ?")
+      .get(key) as { value: string } | null
+    return row?.value ?? null
+  }
+
+  setConfig(key: string, value: string): void {
+    this.db.run(
+      `INSERT INTO runtime_config (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?`,
+      [key, value, new Date().toISOString(), value, new Date().toISOString()]
+    )
+  }
+
+  deleteConfig(key: string): void {
+    this.db.run("DELETE FROM runtime_config WHERE key = ?", [key])
+  }
+
+  getAllConfig(): Array<{ key: string; value: string }> {
+    return this.db
+      .query("SELECT key, value FROM runtime_config ORDER BY key")
+      .all() as Array<{ key: string; value: string }>
+  }
+
+  clearAllConfig(): void {
+    this.db.run("DELETE FROM runtime_config")
   }
 
   // ---------------------------------------------------------------------------

@@ -47,13 +47,20 @@ const MIME_TYPES: Record<string, string> = {
   ".webp": "image/webp",
 }
 
-/** Build spawn env: inherit Bun.env, strip CLAUDECODE, inject token */
+/** Build spawn env: inherit Bun.env, strip CLAUDECODE, inject token.
+ *  Cached per token — avoids rebuilding the env object on every spawn call. */
+let _cachedEnv: Record<string, string> | null = null
+let _cachedToken: string | null = null
+
 export function buildSpawnEnv(token: string): Record<string, string> {
+  if (_cachedEnv && _cachedToken === token) return _cachedEnv
   const { CLAUDECODE: _stripped, ...rest } = Bun.env
-  return Object.fromEntries(
+  _cachedEnv = Object.fromEntries(
     Object.entries({ ...rest, CLAUDE_CODE_OAUTH_TOKEN: token })
       .filter((entry): entry is [string, string] => entry[1] !== undefined)
   )
+  _cachedToken = token
+  return _cachedEnv
 }
 
 export class Agent {

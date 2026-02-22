@@ -5,12 +5,13 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 ## Features
 
 - **REPL** — Terminal interface with slash commands, multiline input, vision support
-- **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, auto-restart
-- **SQLite Persistence** — Sessions, messages, and stats in a single atomic database
+- **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, LRU agent eviction
+- **Runtime Config** — Change all agent parameters live from Telegram (`/config`), admin-only
+- **SQLite Persistence** — Sessions, messages, config, and stats in a single atomic database
 - **Vision** — Send images via `/image` (REPL) or photo messages (Telegram)
 - **Retry & Timeout** — Exponential backoff on transient errors, configurable timeout
 - **Docker Isolation** — Optional containerized execution with resource limits
-- **Test Suite** — 93 tests covering all modules (bun:test)
+- **Test Suite** — 114 tests covering all modules (bun:test)
 
 ## Requirements
 
@@ -39,6 +40,7 @@ cp .env.example .env  # edit with your tokens
 |----------|----------|---------|-------------|
 | `CLAUDE_CODE_OAUTH_TOKEN` | Yes | — | Claude CLI auth token |
 | `TELEGRAM_BOT_TOKEN` | Bot only | — | Telegram bot token from @BotFather |
+| `TELEGRAM_ADMIN_ID` | No | — | Telegram chat ID for admin access (`/config`) |
 | `CLAUDE_AGENT_SYSTEM_PROMPT` | No | `""` | Custom agent persona/instructions |
 | `CLAUDE_AGENT_TIMEOUT_MS` | No | `120000` | Max response time (ms) |
 | `CLAUDE_AGENT_MAX_RETRIES` | No | `3` | Retry attempts on transient errors |
@@ -84,8 +86,36 @@ bun run telegram.ts
 | `/help` | Available commands |
 | `/reset` | Clear session |
 | `/stats` | Session statistics |
+| `/config` | Runtime configuration (admin only) |
 
 Send photos with optional captions for vision analysis.
+
+#### Runtime Configuration (Admin Only)
+
+Set `TELEGRAM_ADMIN_ID` to your Telegram chat ID. Then use:
+
+```
+/config                     Show all current settings
+/config <key>               Show single setting with details
+/config <key> <value>       Change a setting (validated)
+/config reset               Restore all defaults
+/config reset <key>         Restore single default
+```
+
+**Configurable parameters:**
+
+| Key | Type | Default | Range |
+|-----|------|---------|-------|
+| `system_prompt` | string | `""` | — |
+| `timeout_ms` | number | `120000` | 5000–600000 |
+| `max_retries` | number | `3` | 0–10 |
+| `retry_delay_ms` | number | `1000` | 100–30000 |
+| `skip_permissions` | boolean | `true` | — |
+| `log_level` | string | `INFO` | DEBUG/INFO/WARN/ERROR |
+| `docker` | boolean | `false` | — |
+| `docker_image` | string | `claude-agent:latest` | — |
+
+Changes are validated, persisted in SQLite, and applied immediately. They survive bot restarts.
 
 ### Tests
 
@@ -96,69 +126,71 @@ bun test
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Entry Points                         │
-│                                                          │
-│   index.ts (REPL)              telegram.ts (Bot)         │
-│       │                             │                    │
-│       ▼                             ▼                    │
-│   ┌───────┐                    ┌─────────┐              │
-│   │ Repl  │                    │ grammy  │              │
-│   │       │                    │  Bot    │              │
-│   └───┬───┘                    └────┬────┘              │
-│       │                             │                    │
-│       ▼                             ▼                    │
-│   ┌────────────────────────────────────┐                │
-│   │            Agent                    │                │
-│   │  Bun.spawn("claude --print ...")    │                │
-│   │  Retry + Timeout + JSON parsing     │                │
-│   └──────────────┬─────────────────────┘                │
-│                  │                                       │
-│       ┌──────────┴──────────┐                           │
-│       ▼                     ▼                            │
-│  ┌──────────┐       ┌──────────────┐                    │
-│  │ History  │       │ SessionStore │                    │
-│  │ Manager  │       │  (Telegram)  │                    │
-│  └────┬─────┘       └──────┬───────┘                    │
-│       │                    │                             │
-│       ▼                    ▼                             │
-│  ┌─────────────────────────────────┐                    │
-│  │         Database (SQLite)        │                    │
-│  │  sessions │ messages │ telegram  │                    │
-│  │           neo.db (WAL mode)      │                    │
-│  └─────────────────────────────────┘                    │
-│                                                          │
-│  ┌──────────┐  ┌────────┐  ┌─────────┐  ┌───────┐     │
-│  │  Config  │  │ Logger │  │ Spinner │  │ Utils │     │
-│  └──────────┘  └────────┘  └─────────┘  └───────┘     │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                      Entry Points                             │
+│                                                               │
+│   index.ts (REPL)               telegram.ts (Bot)             │
+│       │                              │                        │
+│       ▼                              ▼                        │
+│   ┌───────┐                     ┌─────────┐                  │
+│   │ Repl  │                     │ grammy  │                  │
+│   │       │                     │  Bot    │                  │
+│   └───┬───┘                     └────┬────┘                  │
+│       │                              │                        │
+│       ▼                              ▼                        │
+│   ┌─────────────────────────────────────┐                    │
+│   │             Agent                    │                    │
+│   │  Bun.spawn("claude --print ...")     │                    │
+│   │  Retry + Timeout + JSON parsing      │                    │
+│   └───────────────┬─────────────────────┘                    │
+│                   │                                           │
+│       ┌───────────┼───────────┐                              │
+│       ▼           ▼           ▼                               │
+│  ┌──────────┐ ┌────────────┐ ┌───────────────┐              │
+│  │ History  │ │ Session    │ │ Runtime       │              │
+│  │ Manager  │ │ Store      │ │ Config        │              │
+│  └────┬─────┘ └─────┬──────┘ └──────┬────────┘              │
+│       │              │               │                        │
+│       ▼              ▼               ▼                        │
+│  ┌────────────────────────────────────────────┐              │
+│  │            Database (SQLite)                │              │
+│  │  sessions │ messages │ telegram │ config    │              │
+│  │              neo.db (WAL mode)              │              │
+│  └────────────────────────────────────────────┘              │
+│                                                               │
+│  ┌──────────┐  ┌────────┐  ┌─────────┐  ┌───────┐          │
+│  │  Config  │  │ Logger │  │ Spinner │  │ Utils │          │
+│  └──────────┘  └────────┘  └─────────┘  └───────┘          │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### File Structure
 
 ```
 index.ts             REPL entry point — wires Agent + HistoryManager + Repl
-telegram.ts          Telegram bot — per-chat agents, photo support, session restore
+telegram.ts          Telegram bot — per-chat agents, photo support, /config admin
 src/
   agent.ts           Claude CLI wrapper (spawn, retry, timeout, JSON/stream parsing)
   config.ts          Environment-based configuration with defaults
-  db.ts              SQLite layer (bun:sqlite, WAL mode, schema, CRUD)
+  runtime-config.ts  Runtime config manager (validate, persist, apply via /config)
+  db.ts              SQLite layer (bun:sqlite, WAL mode, schema, CRUD, indexes)
   history.ts         Session & message persistence (SQLite-backed)
   repl.ts            Interactive terminal with 8 slash commands
   session-store.ts   Telegram chatId → sessionId mapping (SQLite-backed)
-  types.ts           All TypeScript interfaces (AgentConfig, SessionFile, etc.)
+  types.ts           All TypeScript interfaces (AgentConfig, RuntimeConfigKey, etc.)
   logger.ts          Structured logging to stderr (4 levels, session context)
   spinner.ts         Braille terminal spinner animation
   utils.ts           Duration formatting helper
   index.ts           Barrel re-exports
 tests/
-  db.test.ts         22 tests — schema, CRUD, stats, Telegram sessions
-  history.test.ts    15 tests — init, addMessage, loadSession, stats
-  session-store.test.ts  10 tests — load, get, set, delete, persistence
-  agent.test.ts      22 tests — parseResponse, TimeoutError, buildArgs
-  config.test.ts     2 tests — defaults, custom env vars
-  utils.test.ts      3 tests — formatDuration
-  logger.test.ts     9 tests — levels, filtering, session ID
+  db.test.ts              22 tests — schema, CRUD, stats, Telegram sessions
+  history.test.ts         15 tests — init, addMessage, loadSession, stats
+  session-store.test.ts   10 tests — load, get, set, delete, persistence
+  agent.test.ts           22 tests — parseResponse, TimeoutError, buildArgs
+  config.test.ts           2 tests — defaults, custom env vars
+  runtime-config.test.ts  21 tests — get/set, validation, reset, persistence
+  utils.test.ts            3 tests — formatDuration
+  logger.test.ts           9 tests — levels, filtering, session ID
 ```
 
 ### Data Flow
@@ -175,7 +207,7 @@ Agent.call(prompt)
     └─ Retry on transient errors (429, 503, ECONNRESET) with exponential backoff
     │
     ▼
-HistoryManager.addMessage()  /  SessionStore.set()
+ HistoryManager.addMessage()  /  SessionStore.set()
     │
     ▼
 Database (SQLite) → INSERT into messages / telegram_sessions
@@ -184,10 +216,13 @@ Database (SQLite) → INSERT into messages / telegram_sessions
 ### Database Schema
 
 ```sql
-sessions         (session_id PK, created_at, updated_at)
-messages         (id PK, session_id FK, timestamp, prompt, response, duration_ms, input_tokens, output_tokens)
+sessions          (session_id PK, created_at, updated_at)
+messages          (id PK, session_id FK, timestamp, prompt, response, duration_ms, input_tokens, output_tokens)
 telegram_sessions (chat_id PK, session_id, updated_at)
+runtime_config    (key PK, value, updated_at)
 ```
+
+**Indexes:** `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id` (composite), `idx_telegram_sessions_session`
 
 Stats are computed via SQL aggregates — no denormalized tables.
 
