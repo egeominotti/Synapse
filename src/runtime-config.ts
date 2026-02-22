@@ -67,6 +67,14 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
       description: "Immagine Docker",
       defaultValue: defaults.dockerImage,
     },
+    {
+      key: "max_concurrent",
+      type: "number",
+      description: "Max agenti concorrenti per chat (1 = seriale)",
+      defaultValue: String(defaults.maxConcurrentPerChat),
+      min: 1,
+      max: 10,
+    },
   ]
 }
 
@@ -129,6 +137,8 @@ export class RuntimeConfig {
         return String(this.config.useDocker)
       case "docker_image":
         return this.config.dockerImage
+      case "max_concurrent":
+        return String(this.config.maxConcurrentPerChat)
     }
   }
 
@@ -251,6 +261,9 @@ export class RuntimeConfig {
         break
       case "docker_image":
         this.config.dockerImage = value
+        break
+      case "max_concurrent":
+        this.config.maxConcurrentPerChat = Number(value)
         break
     }
   }

@@ -13,6 +13,9 @@ export const MAX_MEMORY_CHARS = 6000
 /** Max characters per response preview */
 export const MAX_RESPONSE_PREVIEW = 150
 
+/** Max characters for full conversation context (worker agents) */
+export const MAX_FULL_CONTEXT_CHARS = 50_000
+
 export interface MemoryMessage {
   prompt: string
   response: string
@@ -49,6 +52,37 @@ export function buildMemoryContext(messages: MemoryMessage[]): string | null {
   }
 
   // Only header was added — no actual messages fit
+  if (lines.length <= 4) return null
+
+  return lines.join("\n")
+}
+
+/**
+ * Build a FULL conversation context from recent messages — no truncation.
+ * Used by worker agents to get the same knowledge as the master (--resume).
+ * Respects a generous char limit to avoid extreme token usage.
+ */
+export function buildFullConversationContext(messages: MemoryMessage[]): string | null {
+  if (messages.length === 0) return null
+
+  const lines: string[] = [
+    "## Conversazione completa",
+    "",
+    "Questa e' la conversazione completa con l'utente. Rispondi in modo coerente con il contesto.",
+    "",
+  ]
+
+  let totalChars = lines.join("\n").length
+
+  for (const msg of messages) {
+    const entry = `User: ${msg.prompt}\nAssistant: ${msg.response}\n`
+
+    if (totalChars + entry.length > MAX_FULL_CONTEXT_CHARS) break
+
+    lines.push(entry)
+    totalChars += entry.length
+  }
+
   if (lines.length <= 4) return null
 
   return lines.join("\n")

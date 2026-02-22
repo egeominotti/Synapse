@@ -74,6 +74,8 @@ export interface AgentConfig {
   whisperThreads?: number
   /** Groq API key — enables cloud STT as primary with local fallback */
   groqApiKey?: string
+  /** Max concurrent agents per chat (1 = serial, >1 = overflow agents) */
+  maxConcurrentPerChat: number
 }
 
 /** Result of a single agent call */
@@ -111,6 +113,7 @@ export type RuntimeConfigKey =
   | "log_level"
   | "docker"
   | "docker_image"
+  | "max_concurrent"
 
 /** Definition of a runtime-configurable parameter */
 export interface ConfigDefinition {

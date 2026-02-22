@@ -88,6 +88,11 @@ export class Agent {
     logger.setSessionId(id)
   }
 
+  /** Update the system prompt (used to refresh memory context on worker agents). */
+  setSystemPrompt(prompt: string | undefined): void {
+    this.config.systemPrompt = prompt
+  }
+
   /** Send a text prompt with retry + timeout. */
   async call(prompt: string): Promise<AgentCallResult> {
     return this.callWithRetry(() => this.spawnText(prompt))
@@ -410,7 +415,7 @@ export class Agent {
   }
 
   buildArgs(inlinePrompt: string | null, outputFormat: "json" | "stream-json" = "json"): string[] {
-    const args = ["claude", "--print", "--output-format", outputFormat]
+    const args = ["claude", "--print", "--model", "opus", "--output-format", outputFormat]
     if (outputFormat === "stream-json") args.push("--verbose")
     if (this.config.mcpConfigPath) args.push("--mcp-config", this.config.mcpConfigPath)
     if (this.config.skipPermissions) args.push("--dangerously-skip-permissions")

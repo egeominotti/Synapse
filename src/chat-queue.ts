@@ -1,49 +1,56 @@
 /**
- * Per-chat serial message queue.
+ * Per-chat message queue with configurable concurrency.
  *
- * Ensures that for any given chatId, only one message is being processed
- * at a time. Subsequent messages are queued and executed in order.
- * Prevents race conditions on Claude sessions (which are not concurrent-safe).
+ * maxConcurrency=1 (default): serial, identical to previous behavior.
+ * maxConcurrency=N: up to N tasks per chat run concurrently.
+ * Different chats always run independently.
  */
 
+import { Semaphore } from "./semaphore"
 import { logger } from "./logger"
 
 type Task = () => Promise<void>
 
 export class ChatQueue {
-  private readonly queues = new Map<number, Promise<void>>()
+  private readonly semaphores = new Map<number, Semaphore>()
   private readonly pending = new Map<number, number>()
+  private readonly maxConcurrency: number
+
+  constructor(maxConcurrency = 1) {
+    this.maxConcurrency = maxConcurrency
+  }
 
   /**
    * Enqueue a task for the given chat.
-   * The task will wait for any previous task on the same chat to complete
-   * before executing. Different chats run concurrently.
+   * Up to maxConcurrency tasks run concurrently per chat.
+   * Different chats run independently.
    */
-  enqueue(chatId: number, task: Task): Promise<void> {
-    const previous = this.queues.get(chatId) ?? Promise.resolve()
+  async enqueue(chatId: number, task: Task): Promise<void> {
+    if (!this.semaphores.has(chatId)) {
+      this.semaphores.set(chatId, new Semaphore(this.maxConcurrency))
+    }
+    const sem = this.semaphores.get(chatId)!
     this.pending.set(chatId, (this.pending.get(chatId) ?? 0) + 1)
 
-    const next = previous
-      .then(task)
-      .catch((err) => {
-        logger.error("ChatQueue task failed", { chatId, error: String(err) })
-      })
-      .finally(() => {
-        const count = (this.pending.get(chatId) ?? 1) - 1
-        if (count <= 0) {
-          this.queues.delete(chatId)
-          this.pending.delete(chatId)
-        } else {
-          this.pending.set(chatId, count)
-        }
-      })
-
-    this.queues.set(chatId, next)
-    return next
+    await sem.acquire()
+    try {
+      await task()
+    } catch (err) {
+      logger.error("ChatQueue task failed", { chatId, error: String(err) })
+    } finally {
+      sem.release()
+      const count = (this.pending.get(chatId) ?? 1) - 1
+      if (count <= 0) {
+        this.semaphores.delete(chatId)
+        this.pending.delete(chatId)
+      } else {
+        this.pending.set(chatId, count)
+      }
+    }
   }
 
   /** Number of chats with pending work */
   get size(): number {
-    return this.queues.size
+    return this.semaphores.size
   }
 }

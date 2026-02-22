@@ -14,6 +14,7 @@ const baseConfig: AgentConfig = {
   useDocker: false,
   dockerImage: "test:latest",
   systemPrompt: undefined,
+  maxConcurrentPerChat: 1,
 }
 
 // ---------------------------------------------------------------------------

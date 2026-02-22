@@ -47,12 +47,9 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
 
   bot.command("reset", async (ctx) => {
     const chatId = ctx.chat.id
-    const agent = deps.agents.get(chatId)
-    if (agent) {
-      agent.abort() // Kill any running process to unblock the queue
-      agent.cleanup()
-    }
-    deps.agents.delete(chatId)
+    const pool = deps.agentPools.get(chatId)
+    if (pool) pool.cleanup()
+    deps.agentPools.delete(chatId)
     deps.histories.delete(chatId)
     await deps.store.delete(chatId)
     logger.info("Session reset", { chatId })
@@ -61,9 +58,9 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
 
   bot.command("stats", async (ctx) => {
     const chatId = ctx.chat.id
-    const agent = deps.agents.get(chatId)
+    const pool = deps.agentPools.get(chatId)
     const savedSid = deps.store.get(chatId)
-    const sid = agent?.getSessionId() ?? savedSid
+    const sid = pool?.getPrimary().getSessionId() ?? savedSid
 
     const lines = [
       `📊 *Sessione corrente:*\n`,
@@ -122,7 +119,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const lines = [
       "🏓 *Pong!*\n",
       `Uptime: *${uptime}*`,
-      `Agenti attivi: *${deps.agents.size}*`,
+      `Agenti attivi: *${deps.agentPools.size}*`,
       `Sessioni Telegram: *${deps.store.size}*`,
       `Coda messaggi: *${deps.chatQueue.size}*`,
       `DB: ✅ operativo`,
@@ -137,9 +134,9 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
 
   bot.command("export", async (ctx) => {
     const chatId = ctx.chat.id
-    const agent = deps.agents.get(chatId)
+    const pool = deps.agentPools.get(chatId)
     const savedSid = deps.store.get(chatId)
-    const sid = agent?.getSessionId() ?? savedSid
+    const sid = pool?.getPrimary().getSessionId() ?? savedSid
 
     if (!sid) {
       await ctx.reply("📭 Nessuna sessione da esportare. Inizia una conversazione prima.")
@@ -378,9 +375,9 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       rc.reset("system_prompt")
 
       // Reset session so default takes effect immediately
-      const oldAgent = deps.agents.get(chatId)
-      if (oldAgent) oldAgent.cleanup()
-      deps.agents.delete(chatId)
+      const oldPool = deps.agentPools.get(chatId)
+      if (oldPool) oldPool.cleanup()
+      deps.agentPools.delete(chatId)
       deps.histories.delete(chatId)
       await deps.store.delete(chatId)
 
@@ -393,9 +390,9 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       const { oldValue } = rc.set("system_prompt", args)
 
       // Reset session so new prompt takes effect immediately
-      const oldAgent = deps.agents.get(chatId)
-      if (oldAgent) oldAgent.cleanup()
-      deps.agents.delete(chatId)
+      const oldPool = deps.agentPools.get(chatId)
+      if (oldPool) oldPool.cleanup()
+      deps.agentPools.delete(chatId)
       deps.histories.delete(chatId)
       await deps.store.delete(chatId)
 

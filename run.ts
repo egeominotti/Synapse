@@ -13,6 +13,7 @@ import { join } from "path"
 import { loadConfig } from "./src/config"
 import { Database } from "./src/db"
 import { Agent } from "./src/agent"
+import { AgentPool } from "./src/agent-pool"
 import { HistoryManager } from "./src/history"
 import { SessionStore } from "./src/session-store"
 import { RuntimeConfig } from "./src/runtime-config"
@@ -26,6 +27,7 @@ import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
 import { buildMemoryContext } from "./src/memory"
 import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
 import { HealthMonitor } from "./src/health"
+import { generateTeamIdentities } from "./src/agent-identity"
 import { dirname } from "path"
 
 // ---------------------------------------------------------------------------
@@ -56,10 +58,15 @@ function isAdmin(chatId: number): boolean {
   return adminId !== null && chatId === adminId
 }
 
+const team = generateTeamIdentities(agentConfig.maxConcurrentPerChat)
+const teamRoster = team.map((t) => `${t.emoji} ${t.name}`).join(", ")
+
 logger.info("Starting Telegram bot", {
   dbPath: agentConfig.dbPath,
   hasSystemPrompt: !!agentConfig.systemPrompt,
   adminId: adminId ?? "not set",
+  maxConcurrent: agentConfig.maxConcurrentPerChat,
+  team: teamRoster,
 })
 
 const bot = new Bot(botToken)
@@ -69,19 +76,21 @@ const bot = new Bot(botToken)
 // ---------------------------------------------------------------------------
 
 const MAX_AGENTS = 500
-const agents = new Map<number, Agent>()
+const agentPools = new Map<number, AgentPool>()
 const histories = new Map<number, HistoryManager>()
-const chatQueue = new ChatQueue()
+const chatQueue = new ChatQueue(agentConfig.maxConcurrentPerChat)
 const botStartedAt = Date.now()
 
-function getAgent(chatId: number): Agent {
-  if (agents.has(chatId)) {
-    const agent = agents.get(chatId)!
-    agents.delete(chatId)
-    agents.set(chatId, agent)
-    return agent
+function getAgentPool(chatId: number): AgentPool {
+  if (agentPools.has(chatId)) {
+    const pool = agentPools.get(chatId)!
+    // LRU refresh
+    agentPools.delete(chatId)
+    agentPools.set(chatId, pool)
+    return pool
   }
 
+  // Create primary agent
   const savedSessionId = store.get(chatId)
   let agent: Agent
 
@@ -103,17 +112,24 @@ function getAgent(chatId: number): Agent {
     }
   }
 
-  if (agents.size >= MAX_AGENTS) {
-    const oldestKey = agents.keys().next().value!
-    const evicted = agents.get(oldestKey)
+  // LRU eviction
+  if (agentPools.size >= MAX_AGENTS) {
+    const oldestKey = agentPools.keys().next().value!
+    const evicted = agentPools.get(oldestKey)
     evicted?.cleanup()
-    agents.delete(oldestKey)
+    agentPools.delete(oldestKey)
     histories.delete(oldestKey)
-    logger.debug("Agent evicted (LRU)", { evictedChatId: oldestKey, mapSize: agents.size })
+    logger.debug("Agent pool evicted (LRU)", { evictedChatId: oldestKey, mapSize: agentPools.size })
   }
 
-  agents.set(chatId, agent)
-  return agent
+  const pool = new AgentPool(chatId, agent, agentConfig, db)
+  agentPools.set(chatId, pool)
+  return pool
+}
+
+/** Backward-compatible wrapper — returns the primary agent */
+function getAgent(chatId: number): Agent {
+  return getAgentPool(chatId).getPrimary()
 }
 
 function getHistory(chatId: number, agent: Agent): HistoryManager {
@@ -215,6 +231,7 @@ const healthMonitor = new HealthMonitor(
     groqApiKey: agentConfig.groqApiKey,
     whisperModelPath: agentConfig.whisperModelPath,
     botStartedAt,
+    agentPools,
   },
   (msg) => {
     if (adminId) {
@@ -232,7 +249,7 @@ const deps: TelegramDeps = {
   agentConfig,
   db,
   store,
-  agents,
+  agentPools,
   histories,
   runtimeConfig,
   chatQueue,
@@ -241,6 +258,7 @@ const deps: TelegramDeps = {
   botStartedAt,
   isAdmin,
   getAgent,
+  getAgentPool,
   getHistory,
   persistSession,
 }
@@ -312,8 +330,9 @@ bot.start({
           `> db:       ${agentConfig.dbPath}\n` +
           `> memory:   ${globalStats ? `${globalStats.totalMessages} msg / ${globalStats.totalSessions} sessions` : "empty"}\n` +
           `> mcp:      ${getMcpServerNames().length} servers (${getMcpServerNames().join(", ")})\n` +
+          `> team:     ${teamRoster}\n` +
+          `> workers:  ${agentConfig.maxConcurrentPerChat}x per chat\n` +
           `> health:   every 30s\n` +
-          `> sandbox:  pending\n` +
           `> chats:    ${knownChatIds.length}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
           `> retry:    ${agentConfig.maxRetries}x\n` +

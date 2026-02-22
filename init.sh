@@ -197,7 +197,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export BUN_INSTALL="${HOME}/.bun"
 export PATH="${BUN_INSTALL}/bin:${PATH}"
 cd "$SCRIPT_DIR"
-exec bun run --env-file .env telegram.ts
+exec bun run --env-file .env run.ts
 STARTEOF
 chmod +x "$START_SCRIPT"
 log "start.sh creato"

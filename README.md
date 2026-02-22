@@ -5,21 +5,22 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 ## Features
 
 - **REPL** — Terminal interface with slash commands, multiline input, vision support
-- **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, LRU agent eviction
+- **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, concurrent agent pool
 - **Voice Transcription** — Groq API (<1 sec) + local whisper-cli fallback, whisper-large-v3-turbo
 - **HTML Formatted Output** — Claude's Markdown converted to Telegram HTML with smart chunking
 - **MCP Servers** — Memory, Sequential Thinking, Fetch, Filesystem, Git, SQLite, Everything
 - **Runtime Config** — Change all agent parameters live from Telegram (`/config`), admin-only
 - **SQLite Persistence** — Sessions, messages, attachments, config in a single atomic database
 - **Vision** — Send images via `/image` (REPL) or photo messages (Telegram), photos persisted as BLOBs
-- **Message Queue** — Per-chat serial queue prevents race conditions on Claude sessions
+- **Concurrent Agent Pool** — Primary agent (--resume) + overflow agents per chat, configurable concurrency (1-5)
+- **Health Monitor** — System stability checks every 30s with Telegram alerts on state changes
 - **Edit Support** — Edit a sent message to re-process it through Claude
 - **Session Export** — `/export` downloads the full conversation as a Markdown file
 - **Retry** — Exponential backoff on transient errors, optional configurable timeout
 - **Docker Isolation** — Optional containerized execution with resource limits
 - **Sandbox Isolation** — Each Agent runs in `/tmp/neo-agent-*` with cross-platform safety rules
 - **Conversation Memory** — Recent messages injected as context when starting new sessions
-- **Test Suite** — 283 tests across 17 files (bun:test)
+- **Test Suite** — 311 tests across 20 files (bun:test)
 - **CI/CD** — GitHub Actions pipeline + Husky pre-commit hooks (typecheck, lint, format)
 
 ## Requirements
@@ -68,6 +69,7 @@ cp .env.example .env  # edit with your tokens
 | `WHISPER_MODEL_PATH`            | No       | —                        | Path to ggml model file (enables local voice transcription) |
 | `WHISPER_LANGUAGE`              | No       | `auto`                   | Whisper language (`auto` for detection, or ISO 639-1)       |
 | `WHISPER_THREADS`               | No       | `4`                      | CPU threads for whisper (1–16)                              |
+| `CLAUDE_AGENT_MAX_CONCURRENT`   | No       | `1`                      | Max concurrent agents per chat (1–5)                        |
 
 ## Usage
 
@@ -159,13 +161,14 @@ Set `TELEGRAM_ADMIN_ID` to your Telegram chat ID. Then use:
 | `log_level`        | string  | `INFO`                | DEBUG/INFO/WARN/ERROR |
 | `docker`           | boolean | `false`               | —                     |
 | `docker_image`     | string  | `claude-agent:latest` | —                     |
+| `max_concurrent`   | number  | `1`                   | 1–5                   |
 
 Changes are validated, persisted in SQLite, and applied immediately. They survive bot restarts.
 
 ### Development
 
 ```bash
-bun test              # Run 283 tests
+bun test              # Run 311 tests
 bun run typecheck     # TypeScript check
 bun run lint          # ESLint
 bun run format:check  # Prettier check
@@ -208,11 +211,12 @@ bun run format        # Auto-format
 │  └────────────────────────────────────────────┘             │
 │                                                              │
 │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────┐     │
-│  │ ChatQueue │ │ Formatter │ │ Scheduler │ │ Logger │     │
+│  │AgentPool │ │ ChatQueue │ │ Scheduler │ │ Logger │     │
+│  │+Semaphore│ │ Formatter │ │ HealthMon │ │ Memory │     │
 │  └───────────┘ └───────────┘ └───────────┘ └────────┘     │
-│  ┌─────────┐ ┌────────┐                                    │
-│  │ Whisper │ │ Memory │                                    │
-│  └─────────┘ └────────┘                                    │
+│  ┌─────────┐                                               │
+│  │ Whisper │                                               │
+│  └─────────┘                                               │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -223,10 +227,13 @@ index.ts             REPL entry point
 run.ts               Telegram bot entry point (init, caches, whisper, startup)
 src/
   agent.ts           Claude CLI wrapper (spawn, retry, timeout, vision)
+  agent-pool.ts      Per-chat agent pool (primary + overflow agents)
+  semaphore.ts       Counting semaphore for concurrent task limiting
+  health.ts          Health monitor (DB, Groq, whisper, memory checks every 30s)
   sandbox.ts         Sandbox creation, safety rules, file listing, spawn env
   db-core.ts         Database base class (schema, sessions, messages, attachments, cleanup)
   db.ts              Database extends DatabaseCore (Telegram sessions, config, jobs)
-  chat-queue.ts      Per-chat serial message queue
+  chat-queue.ts      Per-chat message queue with configurable concurrency
   config.ts          Environment-based configuration with range validation
   formatter.ts       Markdown → Telegram HTML converter + smart chunking
   memory.ts          Conversation memory builder for session context
@@ -234,7 +241,7 @@ src/
   runtime-config.ts  Runtime config manager (validate, persist, apply via /config)
   scheduler.ts       Job scheduler (croner-based, SQLite-backed)
   history.ts         Session & message persistence (SQLite-backed)
-  whisper.ts         Speech-to-text via whisper-cli + ffmpeg
+  whisper.ts         Speech-to-text: Groq API primary + local whisper-cli fallback
   repl.ts            Interactive terminal with slash commands
   repl-commands.ts   REPL command implementations (pure functions)
   session-store.ts   Telegram chatId → sessionId mapping (SQLite-backed)
@@ -246,7 +253,7 @@ src/
   telegram/
     handlers.ts      Message handlers with DRY executeWithRetry pattern
     commands.ts      Bot commands (/start, /help, /reset, /stats, /config, etc.)
-tests/               283 tests across 17 files
+tests/               311 tests across 20 files
 ```
 
 ### Data Flow
@@ -255,7 +262,10 @@ tests/               283 tests across 17 files
 User input (REPL or Telegram)
     │
     ▼
-ChatQueue.enqueue(chatId)       ← serializes per chat
+ChatQueue.enqueue(chatId)       ← semaphore (1-5 concurrent per chat)
+    │
+    ▼
+AgentPool.acquire()             ← primary (--resume) or overflow (fresh + memory)
     │
     ▼
 Agent.call(prompt)

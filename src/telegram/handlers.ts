@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 import { InputFile, type Bot, type Context } from "grammy"
 import { Agent } from "../agent"
+import type { AgentPool } from "../agent-pool"
 import type { HistoryManager } from "../history"
 import type { AgentCallResult, AgentConfig } from "../types"
 import type { Database } from "../db"
@@ -17,7 +18,7 @@ import type { ChatQueue } from "../chat-queue"
 import type { Scheduler } from "../scheduler"
 import { parseSchedule } from "../scheduler"
 import { formatForTelegram } from "../formatter"
-import { ORCHESTRATOR_IDENTITY, formatIdentityHeader } from "../agent-identity"
+import { formatIdentityHeader } from "../agent-identity"
 import type { WhisperConfig } from "../whisper"
 import { transcribe } from "../whisper"
 import { logger } from "../logger"
@@ -31,7 +32,7 @@ export interface TelegramDeps {
   agentConfig: AgentConfig
   db: Database
   store: SessionStore
-  agents: Map<number, Agent>
+  agentPools: Map<number, AgentPool>
   histories: Map<number, HistoryManager>
   runtimeConfig: RuntimeConfig
   chatQueue: ChatQueue
@@ -40,6 +41,7 @@ export interface TelegramDeps {
   botStartedAt: number
   isAdmin: (chatId: number) => boolean
   getAgent: (chatId: number) => Agent
+  getAgentPool: (chatId: number) => AgentPool
   getHistory: (chatId: number, agent: Agent) => HistoryManager
   persistSession: (chatId: number, agent: Agent) => Promise<void>
 }
@@ -110,8 +112,7 @@ export async function sendSandboxFiles(ctx: Context, agent: Agent, before: FileS
 
 async function sendFormatted(ctx: Context, markdown: string, result: AgentCallResult, header?: string): Promise<void> {
   const meta = buildMeta(result)
-  const headerLine = header ?? formatIdentityHeader(ORCHESTRATOR_IDENTITY)
-  const { chunks, parseMode } = formatForTelegram(markdown, `${headerLine}\n${meta}`)
+  const { chunks, parseMode } = formatForTelegram(markdown, meta, header)
   const replyToId = ctx.msg?.message_id
   for (let i = 0; i < chunks.length; i++) {
     const replyParams = i === 0 && replyToId ? { reply_parameters: { message_id: replyToId } } : {}
@@ -175,11 +176,7 @@ function isSessionError(errorMsg: string): boolean {
 }
 
 function resetAgentSession(chatId: number, deps: TelegramDeps): Agent {
-  const oldAgent = deps.agents.get(chatId)
-  if (oldAgent) oldAgent.cleanup()
-
   const agent = new Agent(deps.agentConfig)
-  deps.agents.set(chatId, agent)
   deps.histories.delete(chatId)
   logger.info("Agent session reset (fresh)", { chatId })
   return agent
@@ -197,11 +194,37 @@ async function executeWithRetry(
   deps: TelegramDeps,
   afterHistory?: (history: HistoryManager, messageId: number | null, result: AgentCallResult) => Promise<void>
 ): Promise<void> {
-  const execute = async (agent: Agent): Promise<void> => {
-    const before = snapshotSandbox(agent)
-    const result = await callFn(agent)
+  const pool = deps.getAgentPool(chatId)
+  const { agent, isOverflow, identity } = pool.acquire()
+  const identityHeader = formatIdentityHeader(identity)
+  const role = isOverflow ? "worker" : "master"
+  const promptPreview = historyPrompt.slice(0, 80) + (historyPrompt.length > 80 ? "..." : "")
 
-    const history = deps.getHistory(chatId, agent)
+  logger.info(`${identity.emoji} ${identity.name} acquired`, {
+    chatId,
+    role,
+    agent: identity.name,
+    prompt: promptPreview,
+  })
+
+  // Notify user which agent picked up the request
+  const statusMsg = `${identity.emoji} <b>${identity.name}</b> sta elaborando...`
+  ctx.reply(statusMsg, { parse_mode: "HTML" }).catch(() => {})
+
+  const execute = async (execAgent: Agent): Promise<void> => {
+    const before = snapshotSandbox(execAgent)
+    const result = await callFn(execAgent)
+
+    logger.info(`${identity.emoji} ${identity.name} responded`, {
+      chatId,
+      agent: identity.name,
+      durationMs: result.durationMs,
+      tokens: result.tokenUsage ? `${result.tokenUsage.inputTokens}→${result.tokenUsage.outputTokens}` : "n/a",
+    })
+
+    // Always record history under the primary agent's session
+    const primaryAgent = pool.getPrimary()
+    const history = deps.getHistory(chatId, primaryAgent)
     const messageId = await history.addMessage({
       timestamp: new Date().toISOString(),
       prompt: historyPrompt,
@@ -211,20 +234,27 @@ async function executeWithRetry(
     })
     if (afterHistory) await afterHistory(history, messageId, result)
 
-    await sendFormatted(ctx, result.text, result)
-    await sendSandboxFiles(ctx, agent, before)
-    await deps.persistSession(chatId, agent)
+    await sendFormatted(ctx, result.text, result, identityHeader)
+    await sendSandboxFiles(ctx, execAgent, before)
+
+    // Only persist session for primary agent
+    if (!isOverflow) {
+      await deps.persistSession(chatId, execAgent)
+    }
   }
 
   try {
-    await execute(deps.getAgent(chatId))
+    await execute(agent)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
+    logger.error(`${identity.emoji} ${identity.name} failed`, { chatId, agent: identity.name, error: msg })
 
-    if (isSessionError(msg)) {
-      logger.debug("Stale session, resetting", { chatId, error: msg })
+    if (!isOverflow && isSessionError(msg)) {
+      logger.info("Stale session, resetting with fresh agent", { chatId })
       try {
-        await execute(resetAgentSession(chatId, deps))
+        const freshAgent = resetAgentSession(chatId, deps)
+        pool.setPrimary(freshAgent)
+        await execute(freshAgent)
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
         logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
@@ -235,6 +265,9 @@ async function executeWithRetry(
       const rp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
       await ctx.reply(`❌ Errore: ${msg}`, rp)
     }
+  } finally {
+    pool.release(agent, isOverflow)
+    logger.info(`${identity.emoji} ${identity.name} released`, { chatId, agent: identity.name, role })
   }
 }
 
@@ -346,7 +379,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     //   }
     // }
 
-    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+    deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Text message", { chatId: ctx.chat.id, length: prompt.length })
       await withTyping(ctx, () => executeWithRetry(ctx, ctx.chat.id, (agent) => agent.call(prompt), prompt, deps))
     })
@@ -358,7 +391,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
 
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
 
-    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+    deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Photo message", { chatId: ctx.chat.id, fileId: largest.file_id, caption })
 
       await withTyping(ctx, async () => {
@@ -387,7 +420,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
 
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
 
-    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+    deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Document message", { chatId: ctx.chat.id, fileId: doc.file_id, fileName, size: doc.file_size })
 
       const agent = deps.getAgent(ctx.chat.id)
@@ -404,7 +437,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     if (!prompt || prompt.startsWith("/")) return
     const corrected = `[Messaggio modificato] ${prompt}`
 
-    await deps.chatQueue.enqueue(edited.chat.id, async () => {
+    deps.chatQueue.enqueue(edited.chat.id, async () => {
       logger.info("Edited text", { chatId: edited.chat.id, length: prompt.length })
       await withTyping(ctx, () =>
         executeWithRetry(ctx, edited.chat.id, (agent) => agent.call(corrected), corrected, deps)
@@ -420,7 +453,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     const caption = edited.caption ?? "Cosa vedi in questa immagine?"
     const corrected = `[Messaggio modificato] ${caption}`
 
-    await deps.chatQueue.enqueue(edited.chat.id, async () => {
+    deps.chatQueue.enqueue(edited.chat.id, async () => {
       logger.info("Edited photo", { chatId: edited.chat.id, fileId: largest.file_id })
 
       await withTyping(ctx, async () => {
@@ -463,7 +496,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
 
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
 
-    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+    deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Voice message", { chatId: ctx.chat.id, fileId: voice.file_id, duration: voice.duration })
 
       await withTyping(ctx, async () => {
@@ -495,7 +528,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
 
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
 
-    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+    deps.chatQueue.enqueue(ctx.chat.id, async () => {
       const fileName = audio.file_name ?? `audio_${Date.now()}.mp3`
       logger.info("Audio message", { chatId: ctx.chat.id, fileId: audio.file_id, fileName })
 

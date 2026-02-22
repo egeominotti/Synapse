@@ -1,6 +1,7 @@
 import { describe, it, expect } from "bun:test"
 import { HealthMonitor, type HealthMonitorDeps } from "../src/health"
 import { Database } from "../src/db"
+import type { AgentPool } from "../src/agent-pool"
 import { mkdtempSync } from "fs"
 import { join } from "path"
 import { tmpdir } from "os"
@@ -14,6 +15,7 @@ function createDeps(overrides: Partial<HealthMonitorDeps> = {}): HealthMonitorDe
   return {
     db: createTestDb(),
     botStartedAt: Date.now() - 60_000,
+    agentPools: new Map<number, AgentPool>(),
     ...overrides,
   }
 }
@@ -69,7 +71,7 @@ describe("HealthMonitor", () => {
     const dir = mkdtempSync(join(tmpdir(), "health-test-"))
     const dbPath = join(dir, "test.db")
     const db = new Database(dbPath)
-    const deps: HealthMonitorDeps = { db, botStartedAt: Date.now() - 60_000 }
+    const deps: HealthMonitorDeps = { db, botStartedAt: Date.now() - 60_000, agentPools: new Map() }
     const alerts: string[] = []
     const monitor = new HealthMonitor(deps, (msg) => alerts.push(msg))
 

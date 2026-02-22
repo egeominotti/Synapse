@@ -12,7 +12,7 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Telegram**: grammy v1.40+
 - **Scheduler**: croner (zero-dep cron library with second-level precision)
 - **Voice**: Groq API (primary) + whisper-cli local (fallback), whisper-large-v3-turbo
-- **Testing**: bun:test (283 tests, 17 files)
+- **Testing**: bun:test (311 tests, 20 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
@@ -23,6 +23,8 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 index.ts / run.ts               Entry points
         │
         ▼
+    AgentPool (src/agent-pool.ts)  Primary + overflow agents per chat
+        │
     Agent (src/agent.ts)         Spawns `claude` CLI, retry + timeout
         │
    ┌────┴────┐
@@ -34,10 +36,11 @@ Database (src/db.ts)             SQLite — sessions, messages, attachments, tel
         ▲
    ┌────┼────────┐
    ▼    ▼        ▼
-RuntimeConfig  ChatQueue  Scheduler   Config + queue + croner-based job scheduler
+RuntimeConfig  ChatQueue  Scheduler   Config + semaphore-based queue + croner scheduler
 
-Whisper (src/whisper.ts)         Optional: voice → text via whisper-cli
-AgentIdentity (src/agent-identity.ts)   Matrix-themed visual identity for agents
+Semaphore (src/semaphore.ts)     Counting semaphore for per-chat concurrency
+Whisper (src/whisper.ts)         Groq API (primary) + whisper-cli local (fallback)
+HealthMonitor (src/health.ts)    System stability checks every 30s with Telegram alerts
 ```
 
 ## Project Structure
@@ -47,16 +50,19 @@ index.ts             → REPL entry point
 run.ts               → Telegram bot entry point (init, caches, scheduler, startup)
 src/
   agent.ts           → Claude CLI wrapper (spawn, retry, timeout, vision)
+  agent-pool.ts      → Per-chat agent pool (primary + overflow agents)
   agent-identity.ts  → Matrix-themed agent identity generator (names, codes, emojis)
+  semaphore.ts       → Counting semaphore for concurrent task limiting
+  health.ts          → Health monitor (DB, Groq, whisper, memory checks every 30s)
   sandbox.ts         → Sandbox creation, safety rules, file listing, spawn env
   db-core.ts         → Database base class (schema, sessions, messages, attachments, cleanup)
   db.ts              → Database extends DatabaseCore (Telegram sessions, config, jobs)
-  chat-queue.ts      → Per-chat serial message queue (prevents race conditions)
+  chat-queue.ts      → Per-chat message queue with configurable concurrency (semaphore-based)
   config.ts          → Env-based configuration with range validation
   formatter.ts       → Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  → Runtime configuration manager (Telegram /config)
   scheduler.ts       → Job scheduler (croner-powered, once/recurring/delay/cron)
-  whisper.ts         → Optional voice-to-text via whisper-cli (local whisper.cpp)
+  whisper.ts         → Speech-to-text: Groq API primary + local whisper-cli fallback
   history.ts         → Session & message persistence (SQLite-backed)
   repl.ts            → Interactive terminal with slash commands
   repl-commands.ts   → REPL command implementations (pure functions)
@@ -78,7 +84,10 @@ tests/
   config.test.ts          → Config loading + range validation (5 tests)
   runtime-config.test.ts  → RuntimeConfig get/set/reset/validation (24 tests)
   formatter.test.ts       → Markdown→HTML conversion + chunking (29 tests)
-  chat-queue.test.ts      → Serial queue ordering + concurrency (5 tests)
+  chat-queue.test.ts      → Serial + concurrent queue ordering (8 tests)
+  semaphore.test.ts       → Counting semaphore concurrency + FIFO (7 tests)
+  agent-pool.test.ts      → Primary/overflow acquire/release/cleanup (8 tests)
+  health.test.ts          → Health monitor checks + state change alerts (10 tests)
   scheduler.test.ts       → parseSchedule, toCronExpr, DB CRUD, Scheduler + croner (40 tests)
   handlers.test.ts        → Free-text schedule parsing (16 tests)
   whisper.test.ts         → Whisper output parsing (7 tests)
@@ -128,8 +137,10 @@ bun install
 - **Graceful shutdown**: Signal handlers (SIGINT/SIGTERM) close DB before exit
 - **Atomic persistence**: SQLite WAL mode — no corrupted files on crash
 - **Photo attachments**: Telegram photos stored as BLOBs in `attachments` table, linked to messages
-- **LRU agent eviction**: Telegram bot caps agents at 500, cleans up sandbox on eviction
-- **Per-chat message queue**: Serial queue per chat prevents race conditions on Claude sessions
+- **Agent pool**: Primary agent (--resume) + overflow agents (fresh + memory) for per-chat concurrency
+- **Concurrency control**: Semaphore-based ChatQueue allows N concurrent calls per chat (configurable)
+- **LRU agent pool eviction**: Telegram bot caps agent pools at 500, cleans up all agents on eviction
+- **Health monitoring**: Checks DB, Groq, whisper, memory every 30s with Telegram alerts on state changes
 - **HTML formatted output**: Markdown → Telegram HTML conversion with smart chunking and fallback
 - **Edited message support**: Re-processes edited messages through Claude with `[Messaggio modificato]` prefix
 - **Runtime config**: All agent params configurable via Telegram `/config` (admin only)
@@ -153,14 +164,16 @@ bun install
 
 All config via environment variables loaded in `src/config.ts`. Required: `CLAUDE_CODE_OAUTH_TOKEN`. For Telegram bot: also `TELEGRAM_BOT_TOKEN`.
 
-| Variable                  | Required  | Default | Description                                    |
-| ------------------------- | --------- | ------- | ---------------------------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN` | Yes       | —       | OAuth token for Claude CLI                     |
-| `TELEGRAM_BOT_TOKEN`      | Yes (bot) | —       | Telegram bot token                             |
-| `TELEGRAM_ADMIN_ID`       | No        | —       | Admin chat ID for privileged commands          |
-| `WHISPER_MODEL_PATH`      | No        | —       | Path to whisper.cpp GGML model (enables voice) |
-| `WHISPER_LANGUAGE`        | No        | `it`    | Whisper language code (ISO 639-1)              |
-| `WHISPER_THREADS`         | No        | `4`     | CPU threads for whisper transcription          |
+| Variable                      | Required  | Default | Description                                    |
+| ----------------------------- | --------- | ------- | ---------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`     | Yes       | —       | OAuth token for Claude CLI                     |
+| `TELEGRAM_BOT_TOKEN`          | Yes (bot) | —       | Telegram bot token                             |
+| `TELEGRAM_ADMIN_ID`           | No        | —       | Admin chat ID for privileged commands          |
+| `WHISPER_MODEL_PATH`          | No        | —       | Path to whisper.cpp GGML model (enables voice) |
+| `WHISPER_LANGUAGE`            | No        | `auto`  | Whisper language code (ISO 639-1 or `auto`)    |
+| `WHISPER_THREADS`             | No        | `4`     | CPU threads for whisper transcription          |
+| `GROQ_API_KEY`                | No        | —       | Groq API key for cloud STT (primary)           |
+| `CLAUDE_AGENT_MAX_CONCURRENT` | No        | `1`     | Max concurrent agents per chat (1-5)           |
 
 ### Runtime (Telegram /config)
 
@@ -176,6 +189,7 @@ Admin can change these at runtime via `/config <key> <value>`:
 | `log_level`        | string  | `INFO`                | DEBUG, INFO, WARN, ERROR |
 | `docker`           | boolean | `false`               | true/false               |
 | `docker_image`     | string  | `claude-agent:latest` | —                        |
+| `max_concurrent`   | number  | `1`                   | 1–5                      |
 
 Changes are validated, persisted in SQLite, and applied immediately. They survive restarts.
 

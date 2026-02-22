@@ -220,12 +220,20 @@ function splitLongText(text: string, maxLen: number): string[] {
  */
 export function formatForTelegram(
   markdown: string,
-  meta?: string
+  meta?: string,
+  header?: string
 ): { chunks: string[]; parseMode: "HTML" | undefined } {
   try {
-    let html = markdownToTelegramHtml(markdown)
+    let html = ""
 
-    // Append meta footer to the HTML
+    // Identity header at the top, bold
+    if (header) {
+      html += `<b>${escapeHtml(header)}</b>\n\n`
+    }
+
+    html += markdownToTelegramHtml(markdown)
+
+    // Meta footer (timing, tokens) at the bottom, italic
     if (meta) {
       html += `\n\n<i>${escapeHtml(meta)}</i>`
     }
@@ -234,7 +242,9 @@ export function formatForTelegram(
     return { chunks, parseMode: "HTML" }
   } catch {
     // Fallback: plain text, no formatting
-    let plain = markdown
+    let plain = ""
+    if (header) plain += `${header}\n\n`
+    plain += markdown
     if (meta) plain += `\n\n${meta}`
     const chunks = chunkHtml(plain)
     return { chunks, parseMode: undefined }

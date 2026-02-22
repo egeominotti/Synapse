@@ -70,3 +70,15 @@ export function formatIdentityHeader(identity: AgentIdentity, extra?: string): s
   if (extra) parts.push(extra)
   return parts.join(" · ")
 }
+
+/**
+ * Generate the full team roster for a given pool size.
+ * Index 0 = ORCHESTRATOR, 1..N = workers with deterministic names.
+ */
+export function generateTeamIdentities(poolSize: number): AgentIdentity[] {
+  const team: AgentIdentity[] = [ORCHESTRATOR_IDENTITY]
+  for (let i = 1; i < poolSize; i++) {
+    team.push(generateIdentity(i))
+  }
+  return team
+}

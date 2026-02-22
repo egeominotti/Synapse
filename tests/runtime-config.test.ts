@@ -20,6 +20,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     useDocker: false,
     dockerImage: "claude-agent:latest",
     systemPrompt: undefined,
+    maxConcurrentPerChat: 1,
     ...overrides,
   }
 }
@@ -246,7 +247,7 @@ describe("RuntimeConfig getAll", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
     const all = rc.getAll()
-    expect(all.length).toBe(8)
+    expect(all.length).toBe(9)
     expect(all.map((a) => a.key)).toContain("timeout_ms")
     expect(all.map((a) => a.key)).toContain("system_prompt")
     expect(all.map((a) => a.key)).toContain("log_level")
