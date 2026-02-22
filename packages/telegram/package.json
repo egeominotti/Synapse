@@ -1,0 +1,22 @@
+{
+  "name": "@neo/telegram",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@neo/core": "*",
+    "@neo/agent": "*",
+    "grammy": "^1.35.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}
