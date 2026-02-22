@@ -10,7 +10,9 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Language**: TypeScript (strict mode, ESNext target)
 - **Database**: SQLite via `bun:sqlite` (WAL mode)
 - **Telegram**: grammy v1.40+
-- **Testing**: bun:test (114 tests)
+- **Testing**: bun:test (148 tests)
+- **Linting**: ESLint (typescript-eslint) + Prettier
+- **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
 
 ## Architecture
@@ -28,18 +30,21 @@ History   SessionStore           Persistence layer
    ▼         ▼
 Database (src/db.ts)             SQLite — sessions, messages, attachments, telegram_sessions, runtime_config
         ▲
-        │
-RuntimeConfig (src/runtime-config.ts)   Config manager — validates, persists, applies at runtime
+   ┌────┴────┐
+   ▼         ▼
+RuntimeConfig   ChatQueue        Config manager + per-chat serial queue
 ```
 
 ## Project Structure
 
 ```
 index.ts             → REPL entry point
-telegram.ts          → Telegram bot entry point (+ /config admin command)
+telegram.ts          → Telegram bot entry point (commands, queue, formatter)
 src/
   agent.ts           → Claude CLI wrapper (spawn, retry, timeout, vision)
+  chat-queue.ts      → Per-chat serial message queue (prevents race conditions)
   config.ts          → Env-based configuration (startup defaults)
+  formatter.ts       → Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  → Runtime configuration manager (Telegram /config)
   db.ts              → SQLite database layer (bun:sqlite, WAL mode)
   history.ts         → Session & message persistence (SQLite-backed)
@@ -57,6 +62,8 @@ tests/
   agent.test.ts           → Parsing, retry logic, args (22 tests)
   config.test.ts          → Config loading (2 tests)
   runtime-config.test.ts  → RuntimeConfig get/set/reset/validation (21 tests)
+  formatter.test.ts       → Markdown→HTML conversion + chunking (29 tests)
+  chat-queue.test.ts      → Serial queue ordering + concurrency (5 tests)
   utils.test.ts           → formatDuration (3 tests)
   logger.test.ts          → Logger levels and output (9 tests)
 ```
@@ -74,7 +81,16 @@ bun run telegram.ts
 bun test
 
 # Type check
-bunx tsc --noEmit
+bun run typecheck
+
+# Lint
+bun run lint
+
+# Format
+bun run format
+
+# Check formatting
+bun run format:check
 
 # Install deps
 bun install
@@ -92,6 +108,9 @@ bun install
 - **Atomic persistence**: SQLite WAL mode — no corrupted files on crash
 - **Photo attachments**: Telegram photos stored as BLOBs in `attachments` table, linked to messages
 - **LRU agent eviction**: Telegram bot caps agents at 500 to prevent memory leaks
+- **Per-chat message queue**: Serial queue per chat prevents race conditions on Claude sessions
+- **HTML formatted output**: Markdown → Telegram HTML conversion with smart chunking and fallback
+- **Edited message support**: Re-processes edited messages through Claude with `[Messaggio modificato]` prefix
 - **Runtime config**: All agent params configurable via Telegram `/config` (admin only)
 - **Cached spawn env**: `buildSpawnEnv()` cached per token to avoid per-call overhead
 
@@ -121,7 +140,7 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 ## Data Storage
 
 - **SQLite database**: `~/.claude-agent/neo.db` (configurable via `CLAUDE_AGENT_DB_PATH`)
-- Tables: `sessions`, `messages`, `telegram_sessions`, `runtime_config`, `attachments`
+- Tables: `sessions`, `messages`, `attachments`, `telegram_sessions`, `runtime_config`
 - WAL mode enabled for concurrent reads + atomic writes
 - Stats computed via SQL aggregates (single source of truth)
 - Indexes: `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id`, `idx_telegram_sessions_session`, `idx_attachments_message`
@@ -144,3 +163,5 @@ runtime_config    (key TEXT PK, value TEXT, updated_at TEXT)
 - Single `grammy` dependency, everything else is Bun-native
 - Tests use temp directories with cleanup — no persistent side effects
 - Admin auth via `TELEGRAM_ADMIN_ID` env var
+- Pre-commit hooks: typecheck + lint + format check
+- CI pipeline: GitHub Actions on push/PR to main

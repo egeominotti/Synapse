@@ -6,12 +6,17 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 
 - **REPL** — Terminal interface with slash commands, multiline input, vision support
 - **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, LRU agent eviction
+- **HTML Formatted Output** — Claude's Markdown converted to Telegram HTML with smart chunking
 - **Runtime Config** — Change all agent parameters live from Telegram (`/config`), admin-only
-- **SQLite Persistence** — Sessions, messages, config, and stats in a single atomic database
+- **SQLite Persistence** — Sessions, messages, attachments, config in a single atomic database
 - **Vision** — Send images via `/image` (REPL) or photo messages (Telegram), photos persisted as BLOBs
+- **Message Queue** — Per-chat serial queue prevents race conditions on Claude sessions
+- **Edit Support** — Edit a sent message to re-process it through Claude
+- **Session Export** — `/export` downloads the full conversation as a Markdown file
 - **Retry & Timeout** — Exponential backoff on transient errors, configurable timeout
 - **Docker Isolation** — Optional containerized execution with resource limits
-- **Test Suite** — 114 tests covering all modules (bun:test)
+- **Test Suite** — 148 tests across 10 files (bun:test)
+- **CI/CD** — GitHub Actions pipeline + Husky pre-commit hooks (typecheck, lint, format)
 
 ## Requirements
 
@@ -86,9 +91,12 @@ bun run telegram.ts
 | `/help`   | Available commands                 |
 | `/reset`  | Clear session                      |
 | `/stats`  | Session statistics                 |
+| `/export` | Download conversation as file      |
+| `/ping`   | Bot health check                   |
 | `/config` | Runtime configuration (admin only) |
 
 Send photos with optional captions for vision analysis.
+Edit a sent message to re-send it to Claude.
 
 #### Runtime Configuration (Admin Only)
 
@@ -117,10 +125,14 @@ Set `TELEGRAM_ADMIN_ID` to your Telegram chat ID. Then use:
 
 Changes are validated, persisted in SQLite, and applied immediately. They survive bot restarts.
 
-### Tests
+### Development
 
 ```bash
-bun test
+bun test              # Run 148 tests
+bun run typecheck     # TypeScript check
+bun run lint          # ESLint
+bun run format:check  # Prettier check
+bun run format        # Auto-format
 ```
 
 ## Architecture
@@ -158,9 +170,9 @@ bun test
 │  │  telegram │ config   │ neo.db (WAL mode)    │              │
 │  └────────────────────────────────────────────┘              │
 │                                                               │
-│  ┌──────────┐  ┌────────┐  ┌─────────┐  ┌───────┐          │
-│  │  Config  │  │ Logger │  │ Spinner │  │ Utils │          │
-│  └──────────┘  └────────┘  └─────────┘  └───────┘          │
+│  ┌───────────┐ ┌───────────┐ ┌────────┐ ┌───────┐          │
+│  │ ChatQueue │ │ Formatter │ │ Logger │ │ Utils │          │
+│  └───────────┘ └───────────┘ └────────┘ └───────┘          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -168,10 +180,12 @@ bun test
 
 ```
 index.ts             REPL entry point — wires Agent + HistoryManager + Repl
-telegram.ts          Telegram bot — per-chat agents, photo support, /config admin
+telegram.ts          Telegram bot — queue, formatter, /config, /export, /ping
 src/
   agent.ts           Claude CLI wrapper (spawn, retry, timeout, JSON/stream parsing)
+  chat-queue.ts      Per-chat serial message queue (prevents race conditions)
   config.ts          Environment-based configuration with defaults
+  formatter.ts       Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  Runtime config manager (validate, persist, apply via /config)
   db.ts              SQLite layer (bun:sqlite, WAL mode, schema, CRUD, indexes)
   history.ts         Session & message persistence (SQLite-backed)
@@ -189,6 +203,8 @@ tests/
   agent.test.ts           22 tests — parseResponse, TimeoutError, buildArgs
   config.test.ts           2 tests — defaults, custom env vars
   runtime-config.test.ts  21 tests — get/set, validation, reset, persistence
+  formatter.test.ts       29 tests — Markdown→HTML conversion, chunking
+  chat-queue.test.ts       5 tests — serial ordering, concurrency, error recovery
   utils.test.ts            3 tests — formatDuration
   logger.test.ts           9 tests — levels, filtering, session ID
 ```
@@ -199,6 +215,9 @@ tests/
 User input (REPL or Telegram)
     │
     ▼
+ChatQueue.enqueue(chatId)       ← serializes per chat
+    │
+    ▼
 Agent.call(prompt)
     │
     ├─ Bun.spawn("claude --print --output-format json --resume <sid> ...")
@@ -207,12 +226,15 @@ Agent.call(prompt)
     └─ Retry on transient errors (429, 503, ECONNRESET) with exponential backoff
     │
     ▼
- HistoryManager.addMessage()  /  SessionStore.set()
+HistoryManager.addMessage()  /  SessionStore.set()
     │
     ├─ INSERT into messages (returns message_id)
     ├─ INSERT into attachments (if photo, with BLOB + file_id)
     ▼
-Database (SQLite) → messages / attachments / telegram_sessions
+Formatter.formatForTelegram()   ← Markdown → HTML + smart chunk
+    │
+    ▼
+ctx.reply(chunk, { parse_mode: "HTML" })
 ```
 
 ### Database Schema
