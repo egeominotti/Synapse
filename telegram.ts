@@ -647,6 +647,28 @@ bot.command("config", async (ctx) => {
 // Text messages
 // ---------------------------------------------------------------------------
 
+/** Check if an error indicates an expired/invalid Claude session */
+function isSessionError(errorMsg: string): boolean {
+  const lower = errorMsg.toLowerCase()
+  return (
+    lower.includes("invalid session") ||
+    lower.includes("session not found") ||
+    lower.includes("session_id") ||
+    lower.includes("could not resume") ||
+    lower.includes("unable to resume") ||
+    (lower.includes("resume") && lower.includes("error"))
+  )
+}
+
+/** Reset agent to a fresh session (no resume), keep DB history intact */
+function resetAgentSession(chatId: number): Agent {
+  const agent = new Agent(agentConfig)
+  agents.set(chatId, agent)
+  histories.delete(chatId)
+  logger.info("Agent session reset (fresh)", { chatId })
+  return agent
+}
+
 /** Core handler for text prompts (used by message + edited_message) */
 async function handleTextPrompt(ctx: Context, prompt: string): Promise<void> {
   const chatId = ctx.chat!.id
@@ -676,12 +698,31 @@ async function handleTextPrompt(ctx: Context, prompt: string): Promise<void> {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error("Text call failed", { chatId, error: msg })
 
-      // If session expired, clear it and let user retry fresh
-      if (msg.includes("session") || msg.includes("resume")) {
-        agents.delete(chatId)
-        histories.delete(chatId)
-        await store.delete(chatId)
-        await ctx.reply("⚠️ Sessione scaduta, resettata automaticamente. Riprova!")
+      // If session expired, auto-retry with a fresh session (no resume)
+      if (isSessionError(msg)) {
+        logger.warn("Session expired, retrying with fresh session", { chatId })
+        try {
+          const freshAgent = resetAgentSession(chatId)
+          const before = snapshotSandbox(freshAgent)
+          const result = await freshAgent.call(prompt)
+
+          const history = getHistory(chatId, freshAgent)
+          await history.addMessage({
+            timestamp: new Date().toISOString(),
+            prompt,
+            response: result.text,
+            durationMs: result.durationMs,
+            tokenUsage: result.tokenUsage,
+          })
+
+          await sendFormatted(ctx, result.text, result)
+          await sendSandboxFiles(ctx, freshAgent, before)
+          await persistSession(chatId, freshAgent)
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
+          logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
+          await ctx.reply(`❌ Errore: ${retryMsg}`)
+        }
       } else {
         await ctx.reply(`❌ Errore: ${msg}`)
       }
@@ -733,11 +774,33 @@ async function handlePhotoPrompt(ctx: Context, fileId: string, caption: string):
       const msg = err instanceof Error ? err.message : String(err)
       logger.error("Photo call failed", { chatId, error: msg })
 
-      if (msg.includes("session") || msg.includes("resume")) {
-        agents.delete(chatId)
-        histories.delete(chatId)
-        await store.delete(chatId)
-        await ctx.reply("⚠️ Sessione scaduta, resettata automaticamente. Riprova!")
+      if (isSessionError(msg)) {
+        logger.warn("Session expired (photo), retrying with fresh session", { chatId })
+        try {
+          const freshAgent = resetAgentSession(chatId)
+          const freshBefore = snapshotSandbox(freshAgent)
+          const result = await freshAgent.callWithRawImage(mediaType, base64, caption)
+
+          const history = getHistory(chatId, freshAgent)
+          const messageId = await history.addMessage({
+            timestamp: new Date().toISOString(),
+            prompt: `[foto] ${caption}`,
+            response: result.text,
+            durationMs: result.durationMs,
+            tokenUsage: result.tokenUsage,
+          })
+          if (messageId) {
+            history.addAttachment(messageId, mediaType, Buffer.from(base64, "base64"), fileId)
+          }
+
+          await sendFormatted(ctx, result.text, result)
+          await sendSandboxFiles(ctx, freshAgent, freshBefore)
+          await persistSession(chatId, freshAgent)
+        } catch (retryErr) {
+          const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
+          logger.error("Retry photo with fresh session also failed", { chatId, error: retryMsg })
+          await ctx.reply(`❌ Errore analisi immagine: ${retryMsg}`)
+        }
       } else {
         await ctx.reply(`❌ Errore analisi immagine: ${msg}`)
       }
