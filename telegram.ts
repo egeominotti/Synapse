@@ -243,6 +243,7 @@ bot.start({
     if (knownChatIds.length > 0) {
       const uptime = new Date().toLocaleString("it-IT", { timeZone: "Europe/Rome" })
 
+      const globalStats = db.getAllStats()
       for (const chatId of knownChatIds) {
         const msg =
           `<code>Wake up, Neo...</code>\n` +
@@ -254,6 +255,7 @@ bot.start({
           `> time:     ${uptime}\n` +
           `> session:  new\n` +
           `> db:       ${agentConfig.dbPath}\n` +
+          `> memory:   ${globalStats ? `${globalStats.totalMessages} msg / ${globalStats.totalSessions} sessions` : "empty"}\n` +
           `> sandbox:  pending\n` +
           `> chats:    ${knownChatIds.length}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
