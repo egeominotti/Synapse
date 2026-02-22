@@ -121,7 +121,7 @@ bun install
 - **No Claude SDK**: Agent spawns `claude` CLI with `--print --output-format json` flags
 - **Session continuity**: `--resume <sessionId>` flag resumes conversations
 - **Vision**: Uses `--input-format stream-json` with base64 image data via stdin
-- **Voice-to-text**: Optional whisper.cpp — OGG Opus → ffmpeg → WAV → whisper-cli → text
+- **Voice-to-text**: Optional whisper.cpp — OGG Opus → ffmpeg → WAV → whisper-cli (boosted: beam-size 8, best-of 8, flash-attn, auto language detection)
 - **Retry**: Exponential backoff on transient errors (429, 503, connection resets)
 - **Timeout**: Optional process timeout (default: disabled), kills on exceed
 - **Concurrent I/O**: Reads stdout/stderr in parallel to prevent deadlock

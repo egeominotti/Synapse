@@ -59,7 +59,7 @@ async function convertToWav(inputPath: string): Promise<string> {
 }
 
 /**
- * Transcribe an audio file using whisper-cli.
+ * Transcribe an audio file using whisper-cli (boosted).
  * Converts to WAV first (Telegram sends OGG Opus which whisper-cli can't read directly).
  */
 export async function transcribe(audioPath: string, config: WhisperConfig): Promise<string> {
@@ -74,7 +74,20 @@ export async function transcribe(audioPath: string, config: WhisperConfig): Prom
     config.language,
     "-t",
     String(config.threads),
+    // -- Boost: accuracy --
+    "--beam-size",
+    "8", // default 5 → wider search
+    "--best-of",
+    "8", // default 5 → more candidates
+    "--entropy-thold",
+    "2.8", // default 2.4 → more tolerant on uncertain segments
+    "--no-speech-thold",
+    "0.3", // default 0.6 → less aggressive silence trimming
+    "--flash-attn", // GPU-accelerated attention (Metal on macOS)
+    // -- Boost: output --
     "--no-prints",
+    "--prompt",
+    "Trascrivi accuratamente.",
     "-f",
     wavPath,
   ]

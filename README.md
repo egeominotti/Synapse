@@ -6,7 +6,7 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 
 - **REPL** — Terminal interface with slash commands, multiline input, vision support
 - **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, LRU agent eviction
-- **Voice Transcription** — Optional local speech-to-text via whisper.cpp (OGG Opus → WAV → text)
+- **Voice Transcription** — Local speech-to-text via whisper.cpp large-v3 (boosted, auto language, flash-attn)
 - **HTML Formatted Output** — Claude's Markdown converted to Telegram HTML with smart chunking
 - **MCP Servers** — Memory, Sequential Thinking, Fetch, Filesystem, Git, SQLite, Everything
 - **Runtime Config** — Change all agent parameters live from Telegram (`/config`), admin-only
@@ -65,7 +65,7 @@ cp .env.example .env  # edit with your tokens
 | `CLAUDE_AGENT_DOCKER`           | No       | `0`                      | Run in Docker containers                              |
 | `CLAUDE_AGENT_DOCKER_IMAGE`     | No       | `claude-agent:latest`    | Docker image name                                     |
 | `WHISPER_MODEL_PATH`            | No       | —                        | Path to ggml model file (enables voice transcription) |
-| `WHISPER_LANGUAGE`              | No       | `it`                     | Whisper transcription language (ISO 639-1)            |
+| `WHISPER_LANGUAGE`              | No       | `auto`                   | Whisper language (`auto` for detection, or ISO 639-1) |
 | `WHISPER_THREADS`               | No       | `4`                      | CPU threads for whisper (1–16)                        |
 
 ## Usage
@@ -124,10 +124,12 @@ Setup:
 
 ```bash
 brew install whisper-cpp ffmpeg
-curl -L -o ~/.claude-agent/ggml-base.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
-# Set WHISPER_MODEL_PATH=~/.claude-agent/ggml-base.bin in .env
+curl -L -o ~/.claude-agent/ggml-large.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
+# Set WHISPER_MODEL_PATH=~/.claude-agent/ggml-large.bin in .env
 ```
+
+Boosted parameters: beam-size 8, best-of 8, flash-attn, auto language detection.
 
 #### Runtime Configuration (Admin Only)
 

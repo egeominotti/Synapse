@@ -53,7 +53,7 @@ export function loadConfig(): AgentConfig {
     systemPrompt: Bun.env.CLAUDE_AGENT_SYSTEM_PROMPT || undefined,
     mcpConfigPath: Bun.env.CLAUDE_AGENT_MCP_CONFIG_PATH || undefined,
     whisperModelPath: Bun.env.WHISPER_MODEL_PATH || undefined,
-    whisperLanguage: Bun.env.WHISPER_LANGUAGE || "it",
+    whisperLanguage: Bun.env.WHISPER_LANGUAGE || "auto",
     whisperThreads: getOptionalEnvInt("WHISPER_THREADS", 4, 1, 16),
   }
 }
