@@ -5,7 +5,7 @@
  */
 
 import { mkdtempSync, lstatSync, readdirSync, rmSync, writeFileSync } from "fs"
-import { join, relative } from "path"
+import { join, relative, extname } from "path"
 import { tmpdir } from "os"
 import { logger } from "./logger"
 
@@ -166,6 +166,65 @@ export function cleanupSandbox(sandboxDir: string): void {
  * List all user-created files in the sandbox (excludes CLAUDE.md).
  * Returns relative paths with their modification times.
  */
+/** Directories to skip when listing sandbox files (generated/dependency/build dirs) */
+const IGNORED_DIRS = new Set([
+  // JavaScript / Node / Bun
+  "node_modules",
+  ".bun",
+  ".npm",
+  ".next",
+  ".nuxt",
+  ".svelte-kit",
+  // Python
+  "__pycache__",
+  ".venv",
+  "venv",
+  "env",
+  ".eggs",
+  "*.egg-info",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  // Rust
+  "target",
+  // Go
+  "vendor",
+  // Java / Kotlin
+  ".gradle",
+  ".m2",
+  // General build/cache
+  "dist",
+  "build",
+  ".cache",
+  ".git",
+  ".svn",
+  ".hg",
+  ".idea",
+  ".vscode",
+  ".DS_Store",
+  "coverage",
+  ".turbo",
+  ".parcel-cache",
+])
+
+/** File extensions to skip (lock files, binaries, etc.) */
+const IGNORED_EXTENSIONS = new Set([
+  ".lock",
+  ".log",
+  ".pyc",
+  ".pyo",
+  ".so",
+  ".dylib",
+  ".dll",
+  ".o",
+  ".a",
+  ".class",
+  ".jar",
+  ".war",
+  ".wasm",
+  ".map",
+])
+
 export function listSandboxFiles(sandboxDir: string): Array<{ path: string; mtimeMs: number }> {
   const results: Array<{ path: string; mtimeMs: number }> = []
   const walk = (dir: string): void => {
@@ -182,10 +241,12 @@ export function listSandboxFiles(sandboxDir: string): Array<{ path: string; mtim
         const stat = lstatSync(fullPath)
         if (stat.isSymbolicLink()) continue // never follow symlinks outside sandbox
         if (stat.isDirectory()) {
+          if (IGNORED_DIRS.has(name)) continue
           walk(fullPath)
         } else if (stat.isFile()) {
           const rel = relative(sandboxDir, fullPath)
           if (rel === "CLAUDE.md") continue
+          if (IGNORED_EXTENSIONS.has(extname(name).toLowerCase())) continue
           results.push({ path: rel, mtimeMs: stat.mtimeMs })
         }
       } catch {
