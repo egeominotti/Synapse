@@ -18,13 +18,14 @@
  *   TELEGRAM_ADMIN_ID             (optional) Telegram chat ID of the admin (only admin can /config)
  */
 
-import { Bot, type Context } from "grammy"
+import { Bot, InputFile, type Context } from "grammy"
 import { loadConfig } from "./src/config"
 import { Database } from "./src/db"
 import { Agent } from "./src/agent"
 import { HistoryManager } from "./src/history"
 import { SessionStore } from "./src/session-store"
 import { RuntimeConfig } from "./src/runtime-config"
+import { ChatQueue } from "./src/chat-queue"
 import { logger } from "./src/logger"
 import { formatForTelegram } from "./src/formatter"
 import type { AgentCallResult, LogLevel, RuntimeConfigKey } from "./src/types"
@@ -111,6 +112,12 @@ function getHistory(chatId: number, agent: Agent): HistoryManager {
 
 // Per-chat history managers (follows same LRU pattern as agents)
 const histories = new Map<number, HistoryManager>()
+
+// Serial queue: one Claude call at a time per chat
+const chatQueue = new ChatQueue()
+
+// Bot start time for uptime tracking
+const botStartedAt = Date.now()
 
 /** Persist session after a successful call */
 async function persistSession(chatId: number, agent: Agent): Promise<void> {
@@ -208,6 +215,8 @@ bot.command("help", async (ctx) => {
     "/start — messaggio di benvenuto",
     "/reset — resetta la conversazione",
     "/stats — statistiche sessione corrente",
+    "/export — esporta conversazione come file",
+    "/ping — stato del bot",
   ]
   if (isAdmin(ctx.chat.id)) {
     lines.push("/config — configurazione runtime (admin)")
@@ -215,7 +224,8 @@ bot.command("help", async (ctx) => {
   lines.push(
     "",
     "💬 Scrivi qualsiasi messaggio per parlare con Claude.",
-    "📷 Manda una foto (con o senza didascalia) per analisi visiva."
+    "📷 Manda una foto (con o senza didascalia) per analisi visiva.",
+    "✏️ Modifica un messaggio per reinviarlo a Claude."
   )
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
 })
@@ -262,6 +272,69 @@ bot.command("stats", async (ctx) => {
   }
 
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+})
+
+bot.command("ping", async (ctx) => {
+  const uptimeMs = Date.now() - botStartedAt
+  const uptimeSec = Math.floor(uptimeMs / 1000)
+  const h = Math.floor(uptimeSec / 3600)
+  const m = Math.floor((uptimeSec % 3600) / 60)
+  const s = uptimeSec % 60
+  const uptime = h > 0 ? `${h}h ${m}m ${s}s` : m > 0 ? `${m}m ${s}s` : `${s}s`
+
+  const lines = [
+    "🏓 *Pong!*\n",
+    `Uptime: *${uptime}*`,
+    `Agenti attivi: *${agents.size}*`,
+    `Sessioni Telegram: *${store.size}*`,
+    `Coda messaggi: *${chatQueue.size}*`,
+    `DB: ✅ operativo`,
+  ]
+
+  await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+})
+
+// ---------------------------------------------------------------------------
+// Export command
+// ---------------------------------------------------------------------------
+
+bot.command("export", async (ctx) => {
+  const chatId = ctx.chat.id
+  const agent = agents.get(chatId)
+  const savedSid = store.get(chatId)
+  const sid = agent?.getSessionId() ?? savedSid
+
+  if (!sid) {
+    await ctx.reply("📭 Nessuna sessione da esportare. Inizia una conversazione prima.")
+    return
+  }
+
+  const messages = db.getMessages(sid)
+  if (messages.length === 0) {
+    await ctx.reply("📭 Sessione vuota, niente da esportare.")
+    return
+  }
+
+  // Build markdown document
+  const lines: string[] = [`# Sessione ${sid.slice(0, 16)}`, ""]
+
+  for (const msg of messages) {
+    const date = new Date(msg.timestamp).toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+    lines.push(`## 👤 Utente — ${date}`)
+    lines.push("", msg.prompt, "")
+    lines.push(`## 🤖 Claude — ${(msg.duration_ms / 1000).toFixed(1)}s`)
+    lines.push("", msg.response, "")
+    lines.push("---", "")
+  }
+
+  const content = lines.join("\n")
+  const filename = `sessione-${sid.slice(0, 8)}.md`
+  const blob = new Blob([content], { type: "text/markdown" })
+  const buffer = Buffer.from(await blob.arrayBuffer())
+
+  await ctx.replyWithDocument(new InputFile(buffer, filename), {
+    caption: `📄 ${messages.length} messaggi esportati`,
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -370,11 +443,9 @@ bot.command("config", async (ctx) => {
 // Text messages
 // ---------------------------------------------------------------------------
 
-bot.on("message:text", async (ctx) => {
-  const chatId = ctx.chat.id
-  const prompt = ctx.message.text
-
-  if (prompt.startsWith("/")) return // ignore unknown commands
+/** Core handler for text prompts (used by message + edited_message) */
+async function handleTextPrompt(ctx: Context, prompt: string): Promise<void> {
+  const chatId = ctx.chat!.id
 
   logger.info("Text message", { chatId, length: prompt.length })
 
@@ -410,24 +481,27 @@ bot.on("message:text", async (ctx) => {
       }
     }
   })
+}
+
+bot.on("message:text", async (ctx) => {
+  const prompt = ctx.message.text
+  if (prompt.startsWith("/")) return
+  await chatQueue.enqueue(ctx.chat.id, () => handleTextPrompt(ctx, prompt))
 })
 
 // ---------------------------------------------------------------------------
 // Photo messages
 // ---------------------------------------------------------------------------
 
-bot.on("message:photo", async (ctx) => {
-  const chatId = ctx.chat.id
-  const caption = ctx.message.caption ?? "Cosa vedi in questa immagine?"
+/** Core handler for photo prompts (used by message + edited_message) */
+async function handlePhotoPrompt(ctx: Context, fileId: string, caption: string): Promise<void> {
+  const chatId = ctx.chat!.id
 
-  const photos = ctx.message.photo
-  const largest = photos[photos.length - 1]
-
-  logger.info("Photo message", { chatId, fileId: largest.file_id, caption })
+  logger.info("Photo message", { chatId, fileId, caption })
 
   await withTyping(ctx, async () => {
     try {
-      const { base64, mediaType } = await downloadFileAsBase64(ctx, largest.file_id)
+      const { base64, mediaType } = await downloadFileAsBase64(ctx, fileId)
 
       const agent = getAgent(chatId)
       const result = await agent.callWithRawImage(mediaType, base64, caption)
@@ -442,7 +516,7 @@ bot.on("message:photo", async (ctx) => {
         tokenUsage: result.tokenUsage,
       })
       if (messageId) {
-        history.addAttachment(messageId, mediaType, Buffer.from(base64, "base64"), largest.file_id)
+        history.addAttachment(messageId, mediaType, Buffer.from(base64, "base64"), fileId)
       }
 
       await sendFormatted(ctx, result.text, result)
@@ -461,6 +535,34 @@ bot.on("message:photo", async (ctx) => {
       }
     }
   })
+}
+
+bot.on("message:photo", async (ctx) => {
+  const caption = ctx.message.caption ?? "Cosa vedi in questa immagine?"
+  const largest = ctx.message.photo[ctx.message.photo.length - 1]
+  await chatQueue.enqueue(ctx.chat.id, () => handlePhotoPrompt(ctx, largest.file_id, caption))
+})
+
+// ---------------------------------------------------------------------------
+// Edited messages — re-process through Claude with [modifica] prefix
+// ---------------------------------------------------------------------------
+
+bot.on("edited_message:text", async (ctx) => {
+  const edited = ctx.editedMessage!
+  const prompt = edited.text
+  if (!prompt || prompt.startsWith("/")) return
+  const corrected = `[Messaggio modificato] ${prompt}`
+  await chatQueue.enqueue(edited.chat.id, () => handleTextPrompt(ctx, corrected))
+})
+
+bot.on("edited_message:photo", async (ctx) => {
+  const edited = ctx.editedMessage!
+  const photos = edited.photo
+  if (!photos || photos.length === 0) return
+  const largest = photos[photos.length - 1]
+  const caption = edited.caption ?? "Cosa vedi in questa immagine?"
+  const corrected = `[Messaggio modificato] ${caption}`
+  await chatQueue.enqueue(edited.chat.id, () => handlePhotoPrompt(ctx, largest.file_id, corrected))
 })
 
 // ---------------------------------------------------------------------------
