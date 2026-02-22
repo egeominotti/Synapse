@@ -12,6 +12,7 @@ type Task = () => Promise<void>
 
 export class ChatQueue {
   private readonly queues = new Map<number, Promise<void>>()
+  private readonly pending = new Map<number, number>()
 
   /**
    * Enqueue a task for the given chat.
@@ -20,6 +21,7 @@ export class ChatQueue {
    */
   enqueue(chatId: number, task: Task): Promise<void> {
     const previous = this.queues.get(chatId) ?? Promise.resolve()
+    this.pending.set(chatId, (this.pending.get(chatId) ?? 0) + 1)
 
     const next = previous
       .then(task)
@@ -27,9 +29,12 @@ export class ChatQueue {
         logger.error("ChatQueue task failed", { chatId, error: String(err) })
       })
       .finally(() => {
-        // Clean up if this is still the last task in the chain
-        if (this.queues.get(chatId) === next) {
+        const count = (this.pending.get(chatId) ?? 1) - 1
+        if (count <= 0) {
           this.queues.delete(chatId)
+          this.pending.delete(chatId)
+        } else {
+          this.pending.set(chatId, count)
         }
       })
 

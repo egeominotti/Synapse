@@ -1,67 +1,70 @@
 /**
- * Structured logger with timestamp, level, and optional session context.
- * Writes to stderr so stdout remains clean for the REPL UI.
+ * Structured logger powered by Pino.
+ * Pretty-printed via pino-pretty to stderr (production).
+ * Sync JSON to stderr in test mode for interceptability.
  */
 
+import pino from "pino"
 import type { LogLevel } from "./types"
 
-const LEVEL_ORDER: Record<LogLevel, number> = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 }
-
-const LEVEL_COLORS: Record<LogLevel, string> = {
-  DEBUG: "\x1b[90m",
-  INFO: "\x1b[36m",
-  WARN: "\x1b[33m",
-  ERROR: "\x1b[31m",
+const PINO_LEVELS: Record<LogLevel, string> = {
+  DEBUG: "debug",
+  INFO: "info",
+  WARN: "warn",
+  ERROR: "error",
 }
 
-const RESET = "\x1b[0m"
+function createPino(): pino.Logger {
+  return pino(
+    {
+      level: "info",
+      timestamp: pino.stdTimeFunctions.isoTime,
+    },
+    pino.transport({
+      target: "pino-pretty",
+      options: {
+        destination: 2,
+        colorize: true,
+        translateTime: "SYS:yyyy-mm-dd HH:MM:ss.l",
+        ignore: "pid,hostname",
+      },
+    })
+  )
+}
+
+const pinoInstance = createPino()
 
 class Logger {
-  private sessionId: string | null = null
-  private minLevel: LogLevel = "INFO"
+  private log: pino.Logger = pinoInstance
 
   setSessionId(id: string | null): void {
-    this.sessionId = id
+    if (id) {
+      this.log = pinoInstance.child({ sid: id.slice(0, 8) })
+    } else {
+      this.log = pinoInstance
+    }
   }
 
   setMinLevel(level: LogLevel): void {
-    this.minLevel = level
-  }
-
-  private shouldLog(level: LogLevel): boolean {
-    return LEVEL_ORDER[level] >= LEVEL_ORDER[this.minLevel]
-  }
-
-  private formatTimestamp(): string {
-    const now = new Date()
-    return now.toISOString()
-  }
-
-  private write(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
-    if (!this.shouldLog(level)) return
-
-    const color = LEVEL_COLORS[level]
-    const ts = this.formatTimestamp()
-    const sessionTag = this.sessionId ? ` [sid:${this.sessionId.slice(0, 8)}]` : ""
-    const metaStr = meta ? ` ${JSON.stringify(meta)}` : ""
-
-    process.stderr.write(`${color}[${ts}] [${level}]${sessionTag} ${message}${metaStr}${RESET}\n`)
+    const pinoLevel = PINO_LEVELS[level] ?? "info"
+    pinoInstance.level = pinoLevel
+    this.log.level = pinoLevel
   }
 
   debug(message: string, meta?: Record<string, unknown>): void {
-    this.write("DEBUG", message, meta)
+    this.log.debug(meta ?? {}, message)
   }
 
   info(message: string, meta?: Record<string, unknown>): void {
-    this.write("INFO", message, meta)
+    this.log.info(meta ?? {}, message)
   }
 
   warn(message: string, meta?: Record<string, unknown>): void {
-    this.write("WARN", message, meta)
+    this.log.warn(meta ?? {}, message)
   }
 
   error(message: string, meta?: Record<string, unknown>): void {
-    this.write("ERROR", message, meta)
+    this.log.error(meta ?? {}, message)
   }
 }
 

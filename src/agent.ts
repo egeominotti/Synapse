@@ -104,7 +104,7 @@ export class Agent {
         lastError = error
 
         if (attempt < this.config.maxRetries && isTransientError(error)) {
-          const delayMs = this.config.initialRetryDelayMs * Math.pow(2, attempt - 1)
+          const delayMs = Math.min(this.config.initialRetryDelayMs * Math.pow(2, attempt - 1), 30_000)
           logger.warn(`Transient error on attempt ${attempt}/${this.config.maxRetries}, retrying in ${delayMs}ms`, {
             error: error.message,
           })

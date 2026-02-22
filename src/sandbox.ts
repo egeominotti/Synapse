@@ -4,7 +4,7 @@
  * that prevent Claude from modifying system files.
  */
 
-import { mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "fs"
+import { mkdtempSync, lstatSync, readdirSync, rmSync, writeFileSync } from "fs"
 import { join, relative } from "path"
 import { tmpdir } from "os"
 import { logger } from "./logger"
@@ -169,7 +169,8 @@ export function listSandboxFiles(sandboxDir: string): Array<{ path: string; mtim
     for (const name of names) {
       const fullPath = join(dir, name)
       try {
-        const stat = statSync(fullPath)
+        const stat = lstatSync(fullPath)
+        if (stat.isSymbolicLink()) continue // never follow symlinks outside sandbox
         if (stat.isDirectory()) {
           walk(fullPath)
         } else if (stat.isFile()) {
