@@ -183,6 +183,11 @@ export class Database extends DatabaseCore {
     return result.changes > 0
   }
 
+  deleteAllJobs(chatId: number): number {
+    const result = this.db.run("DELETE FROM scheduled_jobs WHERE chat_id = ?", [chatId])
+    return result.changes
+  }
+
   countActiveJobs(chatId: number): number {
     const row = this.db
       .query("SELECT COUNT(*) as count FROM scheduled_jobs WHERE chat_id = ? AND active = 1")

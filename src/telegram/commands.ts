@@ -255,9 +255,22 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const text = ctx.message?.text ?? ""
     const args = text.replace(/^\/job\s*/, "").trim()
 
+    // /job clear — delete all jobs for this chat
+    if (args === "clear") {
+      const count = deps.db.deleteAllJobs(ctx.chat.id)
+      if (count > 0) {
+        await ctx.reply(`✅ ${count} job eliminati.`)
+      } else {
+        await ctx.reply("📭 Nessun job da eliminare.")
+      }
+      return
+    }
+
     const deleteMatch = args.match(/^delete\s+(\d+)$/)
     if (!deleteMatch) {
-      await ctx.reply("Uso: `/job delete <id>`", { parse_mode: "Markdown" })
+      await ctx.reply("Uso:\n`/job delete <id>` — elimina un job\n`/job clear` — elimina tutti i job", {
+        parse_mode: "Markdown",
+      })
       return
     }
 
