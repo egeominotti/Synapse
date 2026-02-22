@@ -237,12 +237,12 @@ const STREAM_EDIT_INTERVAL = 1500 // ms between edits (Telegram rate limit)
 const STREAM_MAX_DISPLAY = 4000 // chars per message (margin from 4096 limit)
 
 async function executeWithStreaming(ctx: Context, chatId: number, prompt: string, deps: TelegramDeps): Promise<void> {
+  // Send placeholder FIRST — before agent init, before anything heavy
+  const sentMsg = await ctx.reply("<code>> decrypting...</code>", { parse_mode: "HTML" })
+  const msgId = sentMsg.message_id
+
   const execute = async (agent: Agent): Promise<void> => {
     const before = snapshotSandbox(agent)
-
-    // Send initial placeholder message (Matrix style)
-    const sentMsg = await ctx.reply("<code>> decrypting...</code>", { parse_mode: "HTML" })
-    const msgId = sentMsg.message_id
 
     let accumulated = ""
     let lastEditAt = 0
@@ -313,10 +313,10 @@ async function executeWithStreaming(ctx: Context, chatId: number, prompt: string
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
         logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
-        await ctx.reply(`❌ Errore: ${retryMsg}`)
+        await ctx.api.editMessageText(chatId, msgId, `❌ Errore: ${retryMsg}`).catch(() => {})
       }
     } else {
-      await ctx.reply(`❌ Errore: ${msg}`)
+      await ctx.api.editMessageText(chatId, msgId, `❌ Errore: ${msg}`).catch(() => {})
     }
   }
 }
