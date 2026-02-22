@@ -25,6 +25,7 @@ import { registerHandlers, type TelegramDeps } from "./src/telegram/handlers"
 import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
 import { buildMemoryContext } from "./src/memory"
 import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
+import { HealthMonitor } from "./src/health"
 import { dirname } from "path"
 
 // ---------------------------------------------------------------------------
@@ -205,6 +206,24 @@ if (hasGroq || hasLocalModel) {
 }
 
 // ---------------------------------------------------------------------------
+// Health monitor
+// ---------------------------------------------------------------------------
+
+const healthMonitor = new HealthMonitor(
+  {
+    db,
+    groqApiKey: agentConfig.groqApiKey,
+    whisperModelPath: agentConfig.whisperModelPath,
+    botStartedAt,
+  },
+  (msg) => {
+    if (adminId) {
+      bot.api.sendMessage(adminId, msg, { parse_mode: "HTML" }).catch(() => {})
+    }
+  }
+)
+
+// ---------------------------------------------------------------------------
 // Register commands + handlers
 // ---------------------------------------------------------------------------
 
@@ -239,6 +258,7 @@ bot.catch((err) => {
 
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, stopping bot...`)
+  healthMonitor.stop()
   // scheduler.stop()
   await bot.stop()
   db.close()
@@ -271,6 +291,9 @@ bot.start({
   onStart: async (info) => {
     logger.info(`Bot online: @${info.username}`)
 
+    // Start health monitoring (every 30 seconds)
+    healthMonitor.start(30_000)
+
     // Send startup message to all known chats
     if (knownChatIds.length > 0) {
       const uptime = new Date().toLocaleString("it-IT", { timeZone: "Europe/Rome" })
@@ -289,6 +312,7 @@ bot.start({
           `> db:       ${agentConfig.dbPath}\n` +
           `> memory:   ${globalStats ? `${globalStats.totalMessages} msg / ${globalStats.totalSessions} sessions` : "empty"}\n` +
           `> mcp:      ${getMcpServerNames().length} servers (${getMcpServerNames().join(", ")})\n` +
+          `> health:   every 30s\n` +
           `> sandbox:  pending\n` +
           `> chats:    ${knownChatIds.length}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
