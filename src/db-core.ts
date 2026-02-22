@@ -97,12 +97,20 @@ export class DatabaseCore {
     }
 
     // Backfill: populate chat_id from telegram_sessions for existing data
+    // Step 1: exact match — session_id → chat_id
     this.db.exec(`
       UPDATE sessions SET chat_id = (
         SELECT ts.chat_id FROM telegram_sessions ts WHERE ts.session_id = sessions.session_id
       ) WHERE chat_id IS NULL AND EXISTS (
         SELECT 1 FROM telegram_sessions ts WHERE ts.session_id = sessions.session_id
       )
+    `)
+    // Step 2: if single user, assign ALL orphan sessions to that user
+    this.db.exec(`
+      UPDATE sessions SET chat_id = (
+        SELECT chat_id FROM telegram_sessions LIMIT 1
+      ) WHERE chat_id IS NULL
+        AND (SELECT COUNT(DISTINCT chat_id) FROM telegram_sessions) = 1
     `)
   }
 
