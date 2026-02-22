@@ -1,55 +1,46 @@
 /**
- * Persistent session store for Telegram bot.
- * Maps chatId → Claude sessionId on disk as JSON.
+ * Persistent session store for Telegram bot backed by SQLite.
+ * Maps chatId → Claude sessionId.
  * Survives process restarts — Claude resumes from where it left off.
  */
 
-import { existsSync, mkdirSync } from "fs"
-import { dirname } from "path"
-import { join } from "path"
-import { homedir } from "os"
-
-export const DEFAULT_SESSION_FILE = join(homedir(), ".claude-agent", "telegram-sessions.json")
+import type { Database } from "./db"
+import { logger } from "./logger"
 
 export class SessionStore {
-  private readonly path: string
-  private sessions: Record<number, string> = {}
+  private readonly db: Database
+  /** In-memory cache for fast lookups */
+  private cache: Map<number, string> = new Map()
 
-  constructor(path: string = DEFAULT_SESSION_FILE) {
-    this.path = path
+  constructor(db: Database) {
+    this.db = db
   }
 
+  /** Load all sessions into memory cache */
   async load(): Promise<void> {
-    if (!existsSync(this.path)) return
-    try {
-      const raw = await Bun.file(this.path).text()
-      this.sessions = JSON.parse(raw)
-    } catch {
-      this.sessions = {}
+    const rows = this.db.getAllTelegramSessions()
+    this.cache.clear()
+    for (const row of rows) {
+      this.cache.set(row.chat_id, row.session_id)
     }
+    logger.debug("Telegram sessions loaded into cache", { count: this.cache.size })
   }
 
   get size(): number {
-    return Object.keys(this.sessions).length
+    return this.cache.size
   }
 
   get(chatId: number): string | undefined {
-    return this.sessions[chatId]
+    return this.cache.get(chatId)
   }
 
   async set(chatId: number, sessionId: string): Promise<void> {
-    this.sessions[chatId] = sessionId
-    await this.flush()
+    this.db.setTelegramSession(chatId, sessionId)
+    this.cache.set(chatId, sessionId)
   }
 
   async delete(chatId: number): Promise<void> {
-    delete this.sessions[chatId]
-    await this.flush()
-  }
-
-  private async flush(): Promise<void> {
-    const dir = dirname(this.path)
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
-    await Bun.write(this.path, JSON.stringify(this.sessions, null, 2))
+    this.db.deleteTelegramSession(chatId)
+    this.cache.delete(chatId)
   }
 }

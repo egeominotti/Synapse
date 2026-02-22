@@ -1,184 +1,130 @@
 /**
- * Conversation history persistence.
- * Stores sessions as individual JSON files under ~/.claude-agent/history/.
- * Filename format: {sessionId}.json
+ * Conversation history persistence backed by SQLite.
+ * Stores sessions and messages in the shared database.
  */
 
-import { join } from "path"
-import { mkdirSync, existsSync } from "fs"
-import { readdir } from "fs/promises"
 import type { SessionFile, ConversationMessage, SessionStats } from "./types"
+import type { Database } from "./db"
 import { logger } from "./logger"
 
 export class HistoryManager {
-  private readonly historyDir: string
-  private currentSession: SessionFile | null = null
+  private readonly db: Database
+  private currentSessionId: string | null = null
 
-  constructor(historyDir: string) {
-    this.historyDir = historyDir
-    this.ensureDir()
+  constructor(db: Database) {
+    this.db = db
   }
 
-  private ensureDir(): void {
-    if (!existsSync(this.historyDir)) {
-      try {
-        mkdirSync(this.historyDir, { recursive: true })
-        logger.info("Created history directory", { path: this.historyDir })
-      } catch (err) {
-        logger.error("Failed to create history directory", {
-          path: this.historyDir,
-          error: String(err),
-        })
-      }
-    }
-  }
-
-  /** Initialize or reset the current in-memory session */
+  /** Initialize or switch to a session */
   initSession(sessionId: string): void {
-    const now = new Date().toISOString()
-    this.currentSession = {
-      sessionId,
-      createdAt: now,
-      updatedAt: now,
-      messages: [],
-      stats: {
-        totalMessages: 0,
-        totalDurationMs: 0,
-        totalInputTokens: 0,
-        totalOutputTokens: 0,
-      },
-    }
+    this.db.upsertSession(sessionId)
+    this.currentSessionId = sessionId
     logger.info("Session initialized", { sessionId: sessionId.slice(0, 8) })
   }
 
-  /** Add a message exchange to the current session and persist */
+  /** Add a message exchange to the current session */
   async addMessage(message: ConversationMessage): Promise<void> {
-    if (!this.currentSession) return
+    if (!this.currentSessionId) return
 
-    this.currentSession.messages.push(message)
-    this.currentSession.updatedAt = new Date().toISOString()
-
-    // Update stats
-    const stats = this.currentSession.stats
-    stats.totalMessages++
-    stats.totalDurationMs += message.durationMs
-    if (message.tokenUsage) {
-      stats.totalInputTokens += message.tokenUsage.inputTokens
-      stats.totalOutputTokens += message.tokenUsage.outputTokens
-    }
-
-    await this.persist()
+    this.db.insertMessage(
+      this.currentSessionId,
+      message.timestamp,
+      message.prompt,
+      message.response,
+      message.durationMs,
+      message.tokenUsage?.inputTokens ?? 0,
+      message.tokenUsage?.outputTokens ?? 0
+    )
   }
 
-  /** Get session statistics */
+  /** Get session statistics (computed from DB aggregates) */
   getStats(): SessionStats | null {
-    return this.currentSession?.stats ?? null
+    if (!this.currentSessionId) return null
+    return this.db.getSessionStats(this.currentSessionId)
   }
 
   /** Get the last N messages from the current session */
   getRecentMessages(count: number): ConversationMessage[] {
-    if (!this.currentSession) return []
-    const messages = this.currentSession.messages
-    return messages.slice(Math.max(0, messages.length - count))
+    if (!this.currentSessionId) return []
+
+    return this.db.getRecentMessages(this.currentSessionId, count).map((row) => ({
+      timestamp: row.timestamp,
+      prompt: row.prompt,
+      response: row.response,
+      durationMs: row.duration_ms,
+      tokenUsage:
+        row.input_tokens || row.output_tokens
+          ? { inputTokens: row.input_tokens, outputTokens: row.output_tokens }
+          : null,
+    }))
   }
 
   /** Get the current session ID */
   getCurrentSessionId(): string | null {
-    return this.currentSession?.sessionId ?? null
+    return this.currentSessionId
   }
 
-  /** List all saved session files with metadata */
+  /** List all saved sessions with metadata */
   async listSessions(): Promise<Array<{ sessionId: string; createdAt: string; messageCount: number }>> {
-    try {
-      const files = (await readdir(this.historyDir)).filter((f) => f.endsWith(".json"))
-
-      // Read all files concurrently instead of sequentially
-      const results = await Promise.all(
-        files.map(async (file) => {
-          try {
-            const content = await Bun.file(join(this.historyDir, file)).text()
-            const session: SessionFile = JSON.parse(content)
-            return {
-              sessionId: session.sessionId,
-              createdAt: session.createdAt,
-              messageCount: session.messages.length,
-            }
-          } catch {
-            logger.warn("Skipping corrupted session file", { file })
-            return null
-          }
-        })
-      )
-
-      return results
-        .filter((r): r is NonNullable<typeof r> => r !== null)
-        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    } catch (err) {
-      logger.error("Failed to list sessions", { error: String(err) })
-      return []
-    }
+    return this.db.listSessions()
   }
 
-  /** Load a session from disk by session ID */
+  /** Load a session by ID (supports partial match) */
   async loadSession(sessionId: string): Promise<SessionFile | null> {
-    const filePath = join(this.historyDir, `${sessionId}.json`)
-    try {
-      const bunFile = Bun.file(filePath)
-      if (!(await bunFile.exists())) {
-        // Try partial match — use async readdir to avoid blocking the event loop
-        const allFiles = await readdir(this.historyDir)
-        const files = allFiles.filter((f) => f.startsWith(sessionId))
-        if (files.length === 1) {
-          const matchFile = Bun.file(join(this.historyDir, files[0]))
-          const content = await matchFile.text()
-          const session: SessionFile = JSON.parse(content)
-          this.currentSession = session
-          logger.info("Session loaded via partial match", { sessionId: session.sessionId.slice(0, 8) })
-          return session
-        }
-        if (files.length > 1) {
-          logger.warn("Multiple sessions match prefix", { prefix: sessionId, count: files.length })
-          return null
-        }
-        logger.warn("Session file not found", { sessionId: sessionId.slice(0, 8) })
-        return null
-      }
+    // Try exact match first
+    let session = this.db.getSession(sessionId)
 
-      const content = await bunFile.text()
-      const session: SessionFile = JSON.parse(content)
-      this.currentSession = session
-      logger.info("Session loaded", { sessionId: session.sessionId.slice(0, 8) })
-      return session
-    } catch (err) {
-      logger.error("Failed to load session", { sessionId: sessionId.slice(0, 8), error: String(err) })
+    // Try partial match
+    if (!session) {
+      const fullId = this.db.findSessionByPrefix(sessionId)
+      if (fullId) {
+        session = this.db.getSession(fullId)
+      }
+    }
+
+    if (!session) {
+      logger.warn("Session not found", { sessionId: sessionId.slice(0, 8) })
       return null
     }
-  }
 
-  /** Write current session to disk */
-  async persist(): Promise<void> {
-    if (!this.currentSession) return
+    const messages = this.db.getMessages(session.session_id).map((row) => ({
+      timestamp: row.timestamp,
+      prompt: row.prompt,
+      response: row.response,
+      durationMs: row.duration_ms,
+      tokenUsage:
+        row.input_tokens || row.output_tokens
+          ? { inputTokens: row.input_tokens, outputTokens: row.output_tokens }
+          : null,
+    }))
 
-    const filePath = join(this.historyDir, `${this.currentSession.sessionId}.json`)
-    try {
-      const content = JSON.stringify(this.currentSession, null, 2)
-      await Bun.write(filePath, content)
-      logger.debug("Session persisted", { sessionId: this.currentSession.sessionId.slice(0, 8) })
-    } catch (err) {
-      logger.error("Failed to persist session", { error: String(err) })
+    const stats = this.db.getSessionStats(session.session_id) ?? {
+      totalMessages: 0,
+      totalDurationMs: 0,
+      totalInputTokens: 0,
+      totalOutputTokens: 0,
+    }
+
+    this.currentSessionId = session.session_id
+    logger.info("Session loaded", { sessionId: session.session_id.slice(0, 8) })
+
+    return {
+      sessionId: session.session_id,
+      createdAt: session.created_at,
+      updatedAt: session.updated_at,
+      messages,
+      stats,
     }
   }
 
-  /** Force-save on shutdown */
-  async shutdown(): Promise<void> {
-    if (this.currentSession && this.currentSession.messages.length > 0) {
-      logger.info("Persisting session before shutdown")
-      await this.persist()
-    }
-  }
+  /** No-op — SQLite writes are immediate, kept for interface compatibility */
+  async persist(): Promise<void> {}
 
-  /** Reset the current in-memory session (does not delete file) */
+  /** No-op — DB lifecycle managed externally, kept for interface compatibility */
+  async shutdown(): Promise<void> {}
+
+  /** Reset the current session tracking (does not delete data) */
   reset(): void {
-    this.currentSession = null
+    this.currentSessionId = null
   }
 }

@@ -2,7 +2,7 @@
  * Claude Agent — Telegram Bot
  *
  * Every Telegram chat gets its own Claude session with infinite memory.
- * Sessions are persisted to disk and survive process restarts.
+ * Sessions are persisted to SQLite and survive process restarts.
  * Supports text messages and photos (jpg/png/webp/gif).
  *
  * Usage:
@@ -12,16 +12,17 @@
  *   TELEGRAM_BOT_TOKEN          (required) Telegram bot token from @BotFather
  *   CLAUDE_CODE_OAUTH_TOKEN     (required) OAuth token for Claude CLI
  *   CLAUDE_AGENT_SYSTEM_PROMPT  (optional) System prompt defining the agent's persona
- *   CLAUDE_TELEGRAM_SESSION_FILE (optional) Path to session persistence file
+ *   CLAUDE_AGENT_DB_PATH        (optional) SQLite database path, default ~/.claude-agent/neo.db
  *   CLAUDE_AGENT_LOG_LEVEL      (optional) DEBUG|INFO|WARN|ERROR (default: INFO)
  *   CLAUDE_AGENT_SKIP_PERMISSIONS (optional) Set "0" to disable skip-permissions
  */
 
 import { Bot, type Context } from "grammy"
 import { loadConfig } from "./src/config"
+import { Database } from "./src/db"
 import { Agent } from "./src/agent"
+import { SessionStore } from "./src/session-store"
 import { logger } from "./src/logger"
-import { SessionStore, DEFAULT_SESSION_FILE } from "./src/session-store"
 import type { AgentCallResult, LogLevel } from "./src/types"
 
 // ---------------------------------------------------------------------------
@@ -37,11 +38,11 @@ if (!botToken) {
 const agentConfig = loadConfig()
 logger.setMinLevel((Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO") as LogLevel)
 
-const sessionFile = Bun.env.CLAUDE_TELEGRAM_SESSION_FILE ?? DEFAULT_SESSION_FILE
-const store = new SessionStore(sessionFile)
+const db = new Database(agentConfig.dbPath)
+const store = new SessionStore(db)
 
 logger.info("Starting Telegram bot", {
-  sessionFile,
+  dbPath: agentConfig.dbPath,
   hasSystemPrompt: !!agentConfig.systemPrompt,
 })
 
@@ -57,7 +58,7 @@ function getAgent(chatId: number): Agent {
     const savedSessionId = store.get(chatId)
     if (savedSessionId) {
       agent.setSessionId(savedSessionId)
-      logger.info("Session restored from disk", { chatId, sessionId: savedSessionId.slice(0, 16) + "..." })
+      logger.info("Session restored from DB", { chatId, sessionId: savedSessionId.slice(0, 16) + "..." })
     } else {
       logger.info("New agent created", { chatId })
     }
@@ -180,7 +181,7 @@ bot.command("stats", async (ctx) => {
   await ctx.reply(
     `📊 *Sessione corrente:*\n\n` +
     `Session ID: \`${sid ? sid.slice(0, 16) + "..." : "nessuna"}\`\n` +
-    `Persistenza: ${savedSid ? "✅ salvata su disco" : "⏳ non ancora salvata"}`,
+    `Persistenza: ${savedSid ? "✅ salvata in DB" : "⏳ non ancora salvata"}`,
     { parse_mode: "Markdown" }
   )
 })
@@ -272,6 +273,7 @@ bot.catch((err) => {
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, stopping bot...`)
   await bot.stop()
+  db.close()
   process.exit(0)
 }
 

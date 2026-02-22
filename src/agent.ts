@@ -32,7 +32,7 @@ export class TimeoutError extends Error {
   }
 }
 
-function isTransientError(err: Error): boolean {
+export function isTransientError(err: Error): boolean {
   if (err instanceof TimeoutError) return false // never retry timeouts
   const lower = err.message.toLowerCase()
   return TRANSIENT_PATTERNS.some((p) => lower.includes(p.toLowerCase()))
@@ -48,7 +48,7 @@ const MIME_TYPES: Record<string, string> = {
 }
 
 /** Build spawn env: inherit Bun.env, strip CLAUDECODE, inject token */
-function buildSpawnEnv(token: string): Record<string, string> {
+export function buildSpawnEnv(token: string): Record<string, string> {
   const { CLAUDECODE: _stripped, ...rest } = Bun.env
   return Object.fromEntries(
     Object.entries({ ...rest, CLAUDE_CODE_OAUTH_TOKEN: token })
@@ -271,7 +271,7 @@ export class Agent {
     return { ...this.parseResponse(rawStdout), durationMs }
   }
 
-  private buildArgs(inlinePrompt: string | null, outputFormat: "json" | "stream-json" = "json"): string[] {
+  buildArgs(inlinePrompt: string | null, outputFormat: "json" | "stream-json" = "json"): string[] {
     const args = ["claude", "--print", "--output-format", outputFormat]
     if (outputFormat === "stream-json") args.push("--verbose")
     if (this.config.skipPermissions) args.push("--dangerously-skip-permissions")
@@ -285,7 +285,7 @@ export class Agent {
     return args
   }
 
-  private parseResponse(rawStdout: string): Omit<AgentCallResult, "durationMs"> {
+  parseResponse(rawStdout: string): Omit<AgentCallResult, "durationMs"> {
     const trimmed = rawStdout.trim()
     const lines = trimmed.split("\n").filter((l) => l.trim())
 

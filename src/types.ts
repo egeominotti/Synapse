@@ -54,7 +54,8 @@ export interface AgentConfig {
   timeoutMs: number
   maxRetries: number
   initialRetryDelayMs: number
-  historyDir: string
+  /** Path to the SQLite database file */
+  dbPath: string
   /** If true, passes --dangerously-skip-permissions to claude CLI */
   skipPermissions: boolean
   /** If true, each claude spawn runs inside a Docker container */

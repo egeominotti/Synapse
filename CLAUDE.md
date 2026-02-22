@@ -18,9 +18,10 @@ index.ts           → REPL entry point
 telegram.ts        → Telegram bot entry point
 src/agent.ts       → Claude CLI wrapper (core logic)
 src/config.ts      → Env-based configuration
-src/history.ts     → Session persistence to disk
+src/db.ts          → SQLite database layer (bun:sqlite, WAL mode)
+src/history.ts     → Session persistence (SQLite-backed)
 src/repl.ts        → Interactive terminal interface
-src/session-store.ts → Telegram session mapping
+src/session-store.ts → Telegram session mapping (SQLite-backed)
 src/types.ts       → All TypeScript interfaces
 src/logger.ts      → Structured logging (stderr)
 src/spinner.ts     → Terminal spinner
@@ -60,8 +61,10 @@ All config via environment variables loaded in `src/config.ts`. Required: `CLAUD
 
 ## Data Storage
 
-- REPL sessions: `~/.claude-agent/history/{sessionId}.json`
-- Telegram sessions: `~/.claude-agent/telegram-sessions.json`
+- **SQLite database**: `~/.claude-agent/neo.db` (configurable via `CLAUDE_AGENT_DB_PATH`)
+- Tables: `sessions`, `messages`, `telegram_sessions`
+- WAL mode enabled for concurrent reads + atomic writes
+- Stats computed via SQL aggregates (single source of truth)
 
 ## Conventions
 

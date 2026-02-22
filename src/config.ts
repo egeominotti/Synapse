@@ -10,7 +10,7 @@ import { homedir } from "os"
 const DEFAULT_TIMEOUT_MS = 120_000
 const DEFAULT_MAX_RETRIES = 3
 const DEFAULT_INITIAL_RETRY_DELAY_MS = 1_000
-const DEFAULT_HISTORY_DIR = join(homedir(), ".claude-agent", "history")
+const DEFAULT_DB_PATH = join(homedir(), ".claude-agent", "neo.db")
 
 function getRequiredEnv(key: string): string {
   const value = Bun.env[key]
@@ -38,7 +38,7 @@ export function loadConfig(): AgentConfig {
     timeoutMs: getOptionalEnvInt("CLAUDE_AGENT_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
     maxRetries: getOptionalEnvInt("CLAUDE_AGENT_MAX_RETRIES", DEFAULT_MAX_RETRIES),
     initialRetryDelayMs: getOptionalEnvInt("CLAUDE_AGENT_RETRY_DELAY_MS", DEFAULT_INITIAL_RETRY_DELAY_MS),
-    historyDir: Bun.env.CLAUDE_AGENT_HISTORY_DIR ?? DEFAULT_HISTORY_DIR,
+    dbPath: Bun.env.CLAUDE_AGENT_DB_PATH ?? DEFAULT_DB_PATH,
     skipPermissions: Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS !== "0",
     useDocker: Bun.env.CLAUDE_AGENT_DOCKER === "1",
     dockerImage: Bun.env.CLAUDE_AGENT_DOCKER_IMAGE ?? "claude-agent:latest",

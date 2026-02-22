@@ -3,7 +3,7 @@
  *
  * Interactive conversational agent wrapping the `claude` CLI.
  * Features: retry with backoff, timeout, structured logging,
- * conversation persistence, slash commands, graceful shutdown.
+ * conversation persistence (SQLite), slash commands, graceful shutdown.
  *
  * Usage:
  *   CLAUDE_CODE_OAUTH_TOKEN=<token> bun run index.ts
@@ -13,7 +13,7 @@
  *   CLAUDE_AGENT_TIMEOUT_MS     (optional) Call timeout in ms, default 120000
  *   CLAUDE_AGENT_MAX_RETRIES    (optional) Max retry attempts, default 3
  *   CLAUDE_AGENT_RETRY_DELAY_MS (optional) Initial retry delay in ms, default 1000
- *   CLAUDE_AGENT_HISTORY_DIR    (optional) History directory path
+ *   CLAUDE_AGENT_DB_PATH        (optional) SQLite database path, default ~/.claude-agent/neo.db
  *   CLAUDE_AGENT_LOG_LEVEL      (optional) Log level: DEBUG|INFO|WARN|ERROR
  *   CLAUDE_AGENT_DOCKER         (optional) Set to "1" to sandbox each spawn in Docker
  *   CLAUDE_AGENT_DOCKER_IMAGE   (optional) Docker image name (default: claude-agent:latest)
@@ -21,6 +21,7 @@
  */
 
 import { loadConfig } from "./src/config"
+import { Database } from "./src/db"
 import { Agent } from "./src/agent"
 import { HistoryManager } from "./src/history"
 import { Repl } from "./src/repl"
@@ -39,12 +40,13 @@ async function main(): Promise<void> {
   logger.info("Starting Claude Agent", {
     timeoutMs: config.timeoutMs,
     maxRetries: config.maxRetries,
-    historyDir: config.historyDir,
+    dbPath: config.dbPath,
   })
 
   // Initialize components
+  const db = new Database(config.dbPath)
   const agent = new Agent(config)
-  const history = new HistoryManager(config.historyDir)
+  const history = new HistoryManager(db)
   const repl = new Repl(agent, history)
 
   // Graceful shutdown handler
@@ -61,8 +63,8 @@ async function main(): Promise<void> {
     // Restore cursor visibility
     process.stdout.write("\x1b[?25h")
 
-    // Persist history
-    await history.shutdown()
+    // Close database
+    db.close()
 
     // Print final stats
     const stats = history.getStats()
@@ -80,17 +82,12 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => shutdown("SIGINT"))
   process.on("SIGTERM", () => shutdown("SIGTERM"))
 
-  // Restore cursor and persist on any unexpected crash.
-  // These handlers MUST be synchronous — Node/Bun exits when the handler returns,
-  // so async work after the first await is not guaranteed to run.
-  // We kick off async flush best-effort and chain process.exit(1) on completion.
+  // Restore cursor and close DB on any unexpected crash.
   const crashHandler = (err: unknown, origin: string): void => {
     process.stdout.write("\x1b[?25h") // restore cursor synchronously
     process.stderr.write(`\n[FATAL] ${origin}: ${String(err)}\n`)
-    // Best-effort async history flush; exit(1) regardless of outcome
-    history.shutdown()
-      .catch(() => {})
-      .finally(() => process.exit(1))
+    try { db.close() } catch {}
+    process.exit(1)
   }
   process.on("uncaughtException", (err) => crashHandler(err, "uncaughtException"))
   process.on("unhandledRejection", (err) => crashHandler(err, "unhandledRejection"))
@@ -103,11 +100,8 @@ async function main(): Promise<void> {
   }
 
   // Normal exit (user typed /exit or EOF).
-  // Guard against race with SIGINT/SIGTERM which also calls history.shutdown().
   if (isShuttingDown) return
   isShuttingDown = true
-
-  await history.shutdown()
 
   const stats = history.getStats()
   if (stats && stats.totalMessages > 0) {
@@ -117,6 +111,7 @@ async function main(): Promise<void> {
     )
   }
 
+  db.close()
   process.stdout.write("\x1b[1;36mArrivederci.\x1b[0m\n\n")
 }
 

@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "test": "bun test"
+  },
   "dependencies": {
     "grammy": "^1.40.0"
   }
