@@ -18,6 +18,8 @@ import type { Scheduler } from "../scheduler"
 import { parseSchedule } from "../scheduler"
 import { formatForTelegram } from "../formatter"
 import { ORCHESTRATOR_IDENTITY, formatIdentityHeader } from "../agent-identity"
+import type { WhisperConfig } from "../whisper"
+import { transcribe } from "../whisper"
 import { logger } from "../logger"
 
 // ---------------------------------------------------------------------------
@@ -34,6 +36,7 @@ export interface TelegramDeps {
   runtimeConfig: RuntimeConfig
   chatQueue: ChatQueue
   scheduler: Scheduler
+  whisperConfig: WhisperConfig | null
   botStartedAt: number
   isAdmin: (chatId: number) => boolean
   getAgent: (chatId: number) => Agent
@@ -431,6 +434,75 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
             }
           }
         )
+      })
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // Voice messages (whisper.cpp transcription)
+  // ---------------------------------------------------------------------------
+
+  bot.on("message:voice", async (ctx) => {
+    const voice = ctx.message.voice
+
+    if (!deps.whisperConfig) {
+      await ctx.reply(
+        "🎙 Trascrizione vocale non disponibile.\n\n" +
+          "Per abilitarla:\n" +
+          "1. `brew install whisper-cpp ffmpeg`\n" +
+          "2. Scarica un modello: `curl -L -o model.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin`\n" +
+          "3. Imposta `WHISPER_MODEL_PATH=/path/to/model.bin`",
+        { parse_mode: "Markdown" }
+      )
+      return
+    }
+
+    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
+
+    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+      logger.info("Voice message", { chatId: ctx.chat.id, fileId: voice.file_id, duration: voice.duration })
+
+      await withTyping(ctx, async () => {
+        const agent = deps.getAgent(ctx.chat.id)
+        const voiceFile = `voice_${Date.now()}.ogg`
+        await downloadFileToSandbox(deps.botToken, ctx, voice.file_id, voiceFile, agent)
+
+        const text = await transcribe(join(agent.sandboxDir, voiceFile), deps.whisperConfig!)
+        await ctx.reply(`🎙 _"${text}"_`, { parse_mode: "Markdown" })
+
+        const prompt = `[vocale] ${text}`
+        await executeWithRetry(ctx, ctx.chat.id, (a) => a.call(prompt), prompt, deps)
+      })
+    })
+  })
+
+  bot.on("message:audio", async (ctx) => {
+    const audio = ctx.message.audio
+    const caption = ctx.message.caption
+
+    if (!deps.whisperConfig) {
+      await ctx.reply(
+        "🎙 Trascrizione audio non disponibile.\n\nImposta `WHISPER_MODEL_PATH` per abilitare whisper-cpp.",
+        { parse_mode: "Markdown" }
+      )
+      return
+    }
+
+    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
+
+    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+      const fileName = audio.file_name ?? `audio_${Date.now()}.mp3`
+      logger.info("Audio message", { chatId: ctx.chat.id, fileId: audio.file_id, fileName })
+
+      await withTyping(ctx, async () => {
+        const agent = deps.getAgent(ctx.chat.id)
+        await downloadFileToSandbox(deps.botToken, ctx, audio.file_id, fileName, agent)
+
+        const text = await transcribe(join(agent.sandboxDir, fileName), deps.whisperConfig!)
+        await ctx.reply(`🎙 _"${text}"_`, { parse_mode: "Markdown" })
+
+        const prompt = caption ? `[audio] ${text}\n\n${caption}` : `[audio] ${text}`
+        await executeWithRetry(ctx, ctx.chat.id, (a) => a.call(prompt), prompt, deps)
       })
     })
   })

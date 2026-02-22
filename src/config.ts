@@ -52,5 +52,8 @@ export function loadConfig(): AgentConfig {
     dockerImage: Bun.env.CLAUDE_AGENT_DOCKER_IMAGE ?? "claude-agent:latest",
     systemPrompt: Bun.env.CLAUDE_AGENT_SYSTEM_PROMPT || undefined,
     mcpConfigPath: Bun.env.CLAUDE_AGENT_MCP_CONFIG_PATH || undefined,
+    whisperModelPath: Bun.env.WHISPER_MODEL_PATH || undefined,
+    whisperLanguage: Bun.env.WHISPER_LANGUAGE || "it",
+    whisperThreads: getOptionalEnvInt("WHISPER_THREADS", 4, 1, 16),
   }
 }

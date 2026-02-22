@@ -66,6 +66,12 @@ export interface AgentConfig {
   systemPrompt?: string
   /** Path to MCP configuration file (auto-generated if not set) */
   mcpConfigPath?: string
+  /** Path to whisper.cpp GGML model file — enables voice transcription if set */
+  whisperModelPath?: string
+  /** Whisper language code (ISO 639-1, default: "it") */
+  whisperLanguage?: string
+  /** CPU threads for whisper transcription (default: 4) */
+  whisperThreads?: number
 }
 
 /** Result of a single agent call */

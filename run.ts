@@ -22,6 +22,7 @@ import { logger } from "./src/logger"
 import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, type TelegramDeps } from "./src/telegram/handlers"
+import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
 import { buildMemoryContext } from "./src/memory"
 import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
 import { dirname } from "path"
@@ -179,6 +180,25 @@ async function persistSession(chatId: number, agent: Agent): Promise<void> {
 const scheduler = new Scheduler(db, async () => {})
 
 // ---------------------------------------------------------------------------
+// Whisper (optional voice-to-text)
+// ---------------------------------------------------------------------------
+
+let whisperConfig: WhisperConfig | null = null
+if (agentConfig.whisperModelPath) {
+  const { ok, missing } = await validateWhisperDeps()
+  if (ok) {
+    whisperConfig = {
+      modelPath: agentConfig.whisperModelPath,
+      language: agentConfig.whisperLanguage ?? "it",
+      threads: agentConfig.whisperThreads ?? 4,
+    }
+    logger.info("Whisper enabled", { model: whisperConfig.modelPath, language: whisperConfig.language })
+  } else {
+    logger.warn("Whisper disabled: missing binaries", { missing })
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Register commands + handlers
 // ---------------------------------------------------------------------------
 
@@ -192,6 +212,7 @@ const deps: TelegramDeps = {
   runtimeConfig,
   chatQueue,
   scheduler,
+  whisperConfig,
   botStartedAt,
   isAdmin,
   getAgent,
