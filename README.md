@@ -139,6 +139,8 @@ Supports multiline input via `\` continuation.
 
 ## Architecture
 
+> Detailed Mermaid flowcharts available in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+
 ```
 Telegram / REPL
       │
