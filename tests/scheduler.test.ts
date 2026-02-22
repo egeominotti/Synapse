@@ -80,6 +80,29 @@ describe("parseSchedule", () => {
   it("rejects zero delay", () => {
     expect(() => parseSchedule("in 0m", now)).toThrow("maggiore di 0")
   })
+
+  it('parses "every 30s" (interval seconds)', () => {
+    const spec = parseSchedule("every 30s", now)
+    expect(spec.type).toBe("recurring")
+    expect(spec.intervalMs).toBe(30_000)
+    expect(spec.runAt.getTime()).toBe(now.getTime() + 30_000)
+  })
+
+  it('parses "every 5m" (interval minutes)', () => {
+    const spec = parseSchedule("every 5m", now)
+    expect(spec.type).toBe("recurring")
+    expect(spec.intervalMs).toBe(5 * 60_000)
+  })
+
+  it('parses "in 10s" (delay seconds)', () => {
+    const spec = parseSchedule("in 10s", now)
+    expect(spec.type).toBe("delay")
+    expect(spec.runAt.getTime()).toBe(now.getTime() + 10_000)
+  })
+
+  it("rejects interval below minimum (30s)", () => {
+    expect(() => parseSchedule("every 10s", now)).toThrow("Intervallo minimo")
+  })
 })
 
 // ---------------------------------------------------------------------------

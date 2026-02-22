@@ -15,6 +15,7 @@ import type { SessionStore } from "../session-store"
 import type { RuntimeConfig } from "../runtime-config"
 import type { ChatQueue } from "../chat-queue"
 import type { Scheduler } from "../scheduler"
+import { parseSchedule } from "../scheduler"
 import { formatForTelegram } from "../formatter"
 import { logger } from "../logger"
 
@@ -351,6 +352,44 @@ async function downloadFileToSandbox(
 }
 
 // ---------------------------------------------------------------------------
+// Free-text schedule detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Try to detect a scheduling intent from free text.
+ * Returns { scheduleExpr, prompt } if detected, null otherwise.
+ *
+ * Patterns:
+ *   "ogni 30s dimmi ciao"         → every 30s, "dimmi ciao"
+ *   "every 5m check status"       → every 5m, "check status"
+ *   "tra 10m ricordami di..."     → in 10m, "ricordami di..."
+ *   "alle 18:00 ricordami..."     → at 18:00, "ricordami..."
+ */
+const RE_FREETEXT_SCHEDULE =
+  /^(?:(?:ogni|every)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|(?:tra|in)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|(?:alle|ogni|every|at)\s+\d{1,2}:\d{2})\b/i
+
+function parseFreetextSchedule(text: string): { scheduleExpr: string; prompt: string } | null {
+  const match = text.match(RE_FREETEXT_SCHEDULE)
+  if (!match) return null
+
+  const scheduleExpr = match[0].trim()
+  const prompt = text.slice(match[0].length).trim()
+  if (!prompt) return null
+
+  // Normalize "tra" → "in" for parseSchedule
+  const normalized = scheduleExpr.replace(/^tra\b/i, "in")
+
+  // Validate it actually parses
+  try {
+    parseSchedule(normalized)
+  } catch {
+    return null
+  }
+
+  return { scheduleExpr: normalized, prompt }
+}
+
+// ---------------------------------------------------------------------------
 // Register message listeners
 // ---------------------------------------------------------------------------
 
@@ -358,6 +397,35 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
   bot.on("message:text", async (ctx) => {
     const prompt = ctx.message.text
     if (prompt.startsWith("/")) return
+
+    // Detect free-text schedule intent
+    const schedule = parseFreetextSchedule(prompt)
+    if (schedule) {
+      try {
+        const spec = parseSchedule(schedule.scheduleExpr)
+        const jobId = deps.scheduler.createJob(ctx.chat.id, schedule.prompt, spec)
+        const runAtStr = spec.runAt.toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+        const typeLabel =
+          spec.type === "recurring" ? "🔄 Ricorrente" : spec.type === "delay" ? "⏳ Delay" : "📌 Una volta"
+        const intervalInfo =
+          spec.intervalMs && spec.intervalMs < 86_400_000
+            ? ` (ogni ${spec.intervalMs >= 3_600_000 ? `${spec.intervalMs / 3_600_000}h` : spec.intervalMs >= 60_000 ? `${spec.intervalMs / 60_000}m` : `${spec.intervalMs / 1_000}s`})`
+            : ""
+
+        await ctx.reply(
+          `✅ Job #${jobId} creato\n\n` +
+            `${typeLabel}${intervalInfo}\n` +
+            `Prossima esecuzione: *${runAtStr}*\n` +
+            `Prompt: _${schedule.prompt.slice(0, 100)}${schedule.prompt.length > 100 ? "..." : ""}_`,
+          { parse_mode: "Markdown" }
+        )
+        return
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        await ctx.reply(`❌ ${msg}`)
+        return
+      }
+    }
 
     await deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Text message (streaming)", { chatId: ctx.chat.id, length: prompt.length })

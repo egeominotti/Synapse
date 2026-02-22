@@ -17,12 +17,14 @@
 import type { Database } from "./db"
 import { logger } from "./logger"
 
-const TICK_INTERVAL_MS = 60_000
+const TICK_INTERVAL_MS = 15_000 // 15s ticks for sub-minute scheduling
 const MAX_JOBS_PER_CHAT = 20
 const MAX_CONSECUTIVE_FAILURES = 3
+const MS_PER_SECOND = 1_000
 const MS_PER_MINUTE = 60_000
 const MS_PER_HOUR = 3_600_000
 const MS_PER_DAY = 86_400_000
+const MIN_INTERVAL_MS = 30_000 // minimum recurring interval: 30 seconds
 
 export interface ScheduleSpec {
   type: "once" | "recurring" | "delay"
@@ -38,6 +40,13 @@ export interface JobExecution {
 
 export type JobExecutor = (job: JobExecution) => Promise<void>
 
+/** Convert a time unit string + amount to milliseconds */
+function parseUnitToMs(unit: string, amount: number): number {
+  if (unit === "s" || unit === "sec" || unit === "secondi") return amount * MS_PER_SECOND
+  if (unit.startsWith("h") || unit === "ore" || unit === "ora") return amount * MS_PER_HOUR
+  return amount * MS_PER_MINUTE // m, min, minuti
+}
+
 /**
  * Parse a schedule expression into a ScheduleSpec.
  *
@@ -50,14 +59,25 @@ export type JobExecutor = (job: JobExecution) => Promise<void>
 export function parseSchedule(expr: string, now = new Date()): ScheduleSpec {
   const trimmed = expr.trim().toLowerCase()
 
-  // "in 30m" or "in 2h"
-  const delayMatch = trimmed.match(/^in\s+(\d+)\s*(m|h|min|ore|ora|minuti)$/)
+  // "in 30s", "in 30m" or "in 2h"
+  const delayMatch = trimmed.match(/^in\s+(\d+)\s*(s|m|h|sec|min|ore|ora|minuti|secondi)$/)
   if (delayMatch) {
     const amount = parseInt(delayMatch[1], 10)
     const unit = delayMatch[2]
     if (amount <= 0) throw new Error("Il valore deve essere maggiore di 0")
-    const ms = unit.startsWith("h") || unit === "ore" || unit === "ora" ? amount * MS_PER_HOUR : amount * MS_PER_MINUTE
+    const ms = parseUnitToMs(unit, amount)
     return { type: "delay", runAt: new Date(now.getTime() + ms) }
+  }
+
+  // "every 30s", "every 5m" or "every 2h" — interval-based recurring
+  const intervalMatch = trimmed.match(/^(every|ogni)\s+(\d+)\s*(s|m|h|sec|min|ore|ora|minuti|secondi)$/)
+  if (intervalMatch) {
+    const amount = parseInt(intervalMatch[2], 10)
+    const unit = intervalMatch[3]
+    if (amount <= 0) throw new Error("Il valore deve essere maggiore di 0")
+    const ms = parseUnitToMs(unit, amount)
+    if (ms < MIN_INTERVAL_MS) throw new Error(`Intervallo minimo: ${MIN_INTERVAL_MS / 1000} secondi`)
+    return { type: "recurring", runAt: new Date(now.getTime() + ms), intervalMs: ms }
   }
 
   // "at HH:MM" or "every HH:MM"
@@ -85,8 +105,8 @@ export function parseSchedule(expr: string, now = new Date()): ScheduleSpec {
   }
 
   throw new Error(
-    'Formato non valido. Usa: "at HH:MM", "every HH:MM", "in Nm", "in Nh"\n' +
-      "Esempi: at 18:00, every 09:00, in 30m, in 2h"
+    'Formato non valido. Usa: "at HH:MM", "every HH:MM", "every Ns/Nm/Nh", "in Ns/Nm/Nh"\n' +
+      "Esempi: at 18:00, every 09:00, every 30s, every 5m, in 30m, in 2h"
   )
 }
 

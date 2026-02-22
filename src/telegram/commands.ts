@@ -182,11 +182,14 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       await ctx.reply(
         "⏰ *Uso:*\n\n" +
           "`/schedule at 18:00 <prompt>` — una volta\n" +
-          "`/schedule every 09:00 <prompt>` — ricorrente\n" +
+          "`/schedule every 09:00 <prompt>` — ogni giorno\n" +
+          "`/schedule every 30s <prompt>` — ogni 30 secondi\n" +
+          "`/schedule every 5m <prompt>` — ogni 5 minuti\n" +
           "`/schedule in 30m <prompt>` — dopo un delay\n\n" +
           "Esempi:\n" +
           "`/schedule at 18:00 Ricordami di chiamare Mario`\n" +
           "`/schedule every 09:00 Buongiorno! Programmi per oggi?`\n" +
+          "`/schedule every 1m Controlla lo stato del sistema`\n" +
           "`/schedule in 2h Controlla lo stato del deploy`",
         { parse_mode: "Markdown" }
       )
@@ -194,12 +197,13 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     }
 
     const exprMatch = args.match(
-      /^((?:at|every|alle|ogni)\s+\d{1,2}:\d{2}|in\s+\d+\s*[mh](?:in|ore|ora|inuti)?)\s+(.+)$/i
+      /^((?:at|every|alle|ogni)\s+\d{1,2}:\d{2}|(?:every|ogni)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|in\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi))\s+(.+)$/i
     )
     if (!exprMatch) {
-      await ctx.reply("❌ Formato non valido.\n\nUsa: `/schedule at 18:00 <prompt>`, `/schedule in 30m <prompt>`", {
-        parse_mode: "Markdown",
-      })
+      await ctx.reply(
+        "❌ Formato non valido.\n\nUsa: `/schedule at 18:00 <prompt>`, `/schedule every 30s <prompt>`, `/schedule in 5m <prompt>`",
+        { parse_mode: "Markdown" }
+      )
       return
     }
 
