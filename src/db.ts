@@ -90,10 +90,7 @@ export class Database {
   }
 
   touchSession(sessionId: string): void {
-    this.db.run("UPDATE sessions SET updated_at = ? WHERE session_id = ?", [
-      new Date().toISOString(),
-      sessionId,
-    ])
+    this.db.run("UPDATE sessions SET updated_at = ? WHERE session_id = ?", [new Date().toISOString(), sessionId])
   }
 
   // ---------------------------------------------------------------------------
@@ -133,16 +130,19 @@ export class Database {
          FROM messages WHERE session_id = ? ORDER BY id ASC`
       )
       .all(sessionId) as Array<{
-        timestamp: string
-        prompt: string
-        response: string
-        duration_ms: number
-        input_tokens: number
-        output_tokens: number
-      }>
+      timestamp: string
+      prompt: string
+      response: string
+      duration_ms: number
+      input_tokens: number
+      output_tokens: number
+    }>
   }
 
-  getRecentMessages(sessionId: string, count: number): Array<{
+  getRecentMessages(
+    sessionId: string,
+    count: number
+  ): Array<{
     timestamp: string
     prompt: string
     response: string
@@ -157,13 +157,13 @@ export class Database {
       )
       .all(sessionId, count)
       .reverse() as Array<{
-        timestamp: string
-        prompt: string
-        response: string
-        duration_ms: number
-        input_tokens: number
-        output_tokens: number
-      }>
+      timestamp: string
+      prompt: string
+      response: string
+      duration_ms: number
+      input_tokens: number
+      output_tokens: number
+    }>
   }
 
   // ---------------------------------------------------------------------------
@@ -186,11 +186,11 @@ export class Database {
          FROM messages WHERE session_id = ?`
       )
       .get(sessionId) as {
-        total_messages: number
-        total_duration_ms: number
-        total_input_tokens: number
-        total_output_tokens: number
-      } | null
+      total_messages: number
+      total_duration_ms: number
+      total_input_tokens: number
+      total_output_tokens: number
+    } | null
 
     if (!row || row.total_messages === 0) return null
 
@@ -222,10 +222,10 @@ export class Database {
            LIMIT ?`
         )
         .all(limit) as Array<{
-          session_id: string
-          created_at: string
-          message_count: number
-        }>
+        session_id: string
+        created_at: string
+        message_count: number
+      }>
     ).map((row) => ({
       sessionId: row.session_id,
       createdAt: row.created_at,
@@ -258,9 +258,9 @@ export class Database {
   // ---------------------------------------------------------------------------
 
   getTelegramSession(chatId: number): string | undefined {
-    const row = this.db
-      .query("SELECT session_id FROM telegram_sessions WHERE chat_id = ?")
-      .get(chatId) as { session_id: string } | null
+    const row = this.db.query("SELECT session_id FROM telegram_sessions WHERE chat_id = ?").get(chatId) as {
+      session_id: string
+    } | null
     return row?.session_id
   }
 
@@ -278,9 +278,10 @@ export class Database {
   }
 
   getAllTelegramSessions(): Array<{ chat_id: number; session_id: string }> {
-    return this.db
-      .query("SELECT chat_id, session_id FROM telegram_sessions")
-      .all() as Array<{ chat_id: number; session_id: string }>
+    return this.db.query("SELECT chat_id, session_id FROM telegram_sessions").all() as Array<{
+      chat_id: number
+      session_id: string
+    }>
   }
 
   countTelegramSessions(): number {
@@ -296,7 +297,7 @@ export class Database {
     this.db.run(
       `INSERT INTO attachments (message_id, media_type, file_id, data, created_at)
        VALUES (?, ?, ?, ?, ?)`,
-      [messageId, mediaType, fileId ?? null, data, new Date().toISOString()]
+      [messageId, mediaType, fileId ?? null, new Uint8Array(data), new Date().toISOString()]
     )
   }
 
@@ -309,11 +310,11 @@ export class Database {
     return this.db
       .query("SELECT id, media_type, file_id, data FROM attachments WHERE message_id = ?")
       .all(messageId) as Array<{
-        id: number
-        media_type: string
-        file_id: string | null
-        data: Buffer
-      }>
+      id: number
+      media_type: string
+      file_id: string | null
+      data: Buffer
+    }>
   }
 
   getAttachmentsBySession(sessionId: string): Array<{
@@ -330,10 +331,10 @@ export class Database {
          ORDER BY a.id ASC`
       )
       .all(sessionId) as Array<{
-        message_id: number
-        media_type: string
-        file_id: string | null
-      }>
+      message_id: number
+      media_type: string
+      file_id: string | null
+    }>
   }
 
   // ---------------------------------------------------------------------------
@@ -341,9 +342,7 @@ export class Database {
   // ---------------------------------------------------------------------------
 
   getConfig(key: string): string | null {
-    const row = this.db
-      .query("SELECT value FROM runtime_config WHERE key = ?")
-      .get(key) as { value: string } | null
+    const row = this.db.query("SELECT value FROM runtime_config WHERE key = ?").get(key) as { value: string } | null
     return row?.value ?? null
   }
 
@@ -360,9 +359,10 @@ export class Database {
   }
 
   getAllConfig(): Array<{ key: string; value: string }> {
-    return this.db
-      .query("SELECT key, value FROM runtime_config ORDER BY key")
-      .all() as Array<{ key: string; value: string }>
+    return this.db.query("SELECT key, value FROM runtime_config ORDER BY key").all() as Array<{
+      key: string
+      value: string
+    }>
   }
 
   clearAllConfig(): void {

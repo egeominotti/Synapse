@@ -13,13 +13,13 @@ import { Spinner } from "./spinner"
 import { logger } from "./logger"
 import { formatDuration } from "./utils"
 
-const BOLD   = "\x1b[1m"
-const RESET  = "\x1b[0m"
-const CYAN   = "\x1b[1;36m"
+const BOLD = "\x1b[1m"
+const RESET = "\x1b[0m"
+const CYAN = "\x1b[1;36m"
 const YELLOW = "\x1b[1;33m"
-const GREEN  = "\x1b[1;32m"
-const RED    = "\x1b[31m"
-const DIM    = "\x1b[90m"
+const GREEN = "\x1b[1;32m"
+const RED = "\x1b[31m"
+const DIM = "\x1b[90m"
 
 export class Repl {
   private readonly agent: Agent
@@ -27,7 +27,7 @@ export class Repl {
   private readonly commands: Map<string, SlashCommand> = new Map()
   private readonly rl: RlInterface
   private running = true
-  private rlClosed = false          // tracks whether readline interface has closed
+  private rlClosed = false // tracks whether readline interface has closed
   private activeSpinner: Spinner | null = null
 
   constructor(agent: Agent, history: HistoryManager) {
@@ -41,7 +41,9 @@ export class Repl {
     })
 
     // Track close state so readLine() never hangs after EOF
-    this.rl.on("close", () => { this.rlClosed = true })
+    this.rl.on("close", () => {
+      this.rlClosed = true
+    })
 
     // When terminal:true, readline intercepts Ctrl+C as a raw byte and emits
     // "SIGINT" on the rl interface — not on the process. Re-emit it so our
@@ -230,7 +232,10 @@ export class Repl {
       {
         name: "help",
         description: "Mostra i comandi disponibili",
-        handler: async () => { this.printHelp(); return true },
+        handler: async () => {
+          this.printHelp()
+          return true
+        },
       },
       {
         name: "image",
@@ -243,22 +248,34 @@ export class Repl {
       {
         name: "history",
         description: "Mostra gli ultimi 5 messaggi della sessione",
-        handler: async () => { this.printHistory(); return true },
+        handler: async () => {
+          this.printHistory()
+          return true
+        },
       },
       {
         name: "sessions",
         description: "Lista le sessioni salvate",
-        handler: async () => { await this.printSessions(); return true },
+        handler: async () => {
+          await this.printSessions()
+          return true
+        },
       },
       {
         name: "load",
         description: "Carica una sessione precedente: /load <session_id>",
-        handler: async (args) => { await this.loadSession(args.trim()); return true },
+        handler: async (args) => {
+          await this.loadSession(args.trim())
+          return true
+        },
       },
       {
         name: "stats",
         description: "Mostra le statistiche della sessione corrente",
-        handler: async () => { this.printStats(); return true },
+        handler: async () => {
+          this.printStats()
+          return true
+        },
       },
       {
         name: "reset",
@@ -273,7 +290,10 @@ export class Repl {
       {
         name: "exit",
         description: "Esci dall'agente",
-        handler: async () => { this.running = false; return true },
+        handler: async () => {
+          this.running = false
+          return true
+        },
       },
     ]
 
@@ -293,8 +313,8 @@ export class Repl {
 
     // First token is path, rest is the optional prompt
     const spaceIdx = args.indexOf(" ")
-    const rawPath  = spaceIdx === -1 ? args : args.slice(0, spaceIdx)
-    const prompt   = spaceIdx === -1 ? "" : args.slice(spaceIdx + 1).trim()
+    const rawPath = spaceIdx === -1 ? args : args.slice(0, spaceIdx)
+    const prompt = spaceIdx === -1 ? "" : args.slice(spaceIdx + 1).trim()
     const imagePath = resolve(rawPath)
 
     if (!existsSync(imagePath)) {
@@ -370,7 +390,9 @@ export class Repl {
       return
     }
     this.agent.setSessionId(session.sessionId)
-    this.write(`${GREEN}Sessione caricata: ${session.sessionId.slice(0, 12)}... (${session.messages.length} messaggi)${RESET}\n\n`)
+    this.write(
+      `${GREEN}Sessione caricata: ${session.sessionId.slice(0, 12)}... (${session.messages.length} messaggi)${RESET}\n\n`
+    )
   }
 
   private printStats(): void {
@@ -399,5 +421,7 @@ export class Repl {
     process.stdout.write(text)
   }
 
-  stop(): void { this.running = false }
+  stop(): void {
+    this.running = false
+  }
 }

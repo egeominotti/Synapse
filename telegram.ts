@@ -174,8 +174,11 @@ async function downloadFileAsBase64(ctx: Context, fileId: string): Promise<{ bas
 
   const ext = filePath.split(".").pop()?.toLowerCase() ?? ""
   const mediaTypeMap: Record<string, string> = {
-    jpg: "image/jpeg", jpeg: "image/jpeg",
-    png: "image/png", gif: "image/gif", webp: "image/webp",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
   }
   const mediaType = mediaTypeMap[ext] ?? "image/jpeg"
 
@@ -189,10 +192,10 @@ async function downloadFileAsBase64(ctx: Context, fileId: string): Promise<{ bas
 bot.command("start", async (ctx) => {
   await ctx.reply(
     "👋 Ciao! Sono il tuo agente Claude.\n\n" +
-    "Scrivimi qualcosa o mandami una foto.\n\n" +
-    "/help — comandi disponibili\n" +
-    "/reset — nuova conversazione\n" +
-    "/stats — statistiche sessione"
+      "Scrivimi qualcosa o mandami una foto.\n\n" +
+      "/help — comandi disponibili\n" +
+      "/reset — nuova conversazione\n" +
+      "/stats — statistiche sessione"
   )
 })
 
@@ -209,7 +212,7 @@ bot.command("help", async (ctx) => {
   lines.push(
     "",
     "💬 Scrivi qualsiasi messaggio per parlare con Claude.",
-    "📷 Manda una foto (con o senza didascalia) per analisi visiva.",
+    "📷 Manda una foto (con o senza didascalia) per analisi visiva."
   )
   await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
 })
@@ -244,7 +247,9 @@ bot.command("stats", async (ctx) => {
       lines.push(`Messaggi: *${stats.totalMessages}*`)
       lines.push(`Durata media: *${(avgMs / 1000).toFixed(1)}s*`)
       if (totalTok > 0) {
-        lines.push(`Token: *${totalTok.toLocaleString("it-IT")}* (${stats.totalInputTokens.toLocaleString("it-IT")} in / ${stats.totalOutputTokens.toLocaleString("it-IT")} out)`)
+        lines.push(
+          `Token: *${totalTok.toLocaleString("it-IT")}* (${stats.totalInputTokens.toLocaleString("it-IT")} in / ${stats.totalOutputTokens.toLocaleString("it-IT")} out)`
+        )
       }
       const attachments = db.getAttachmentsBySession(sid)
       if (attachments.length > 0) {
@@ -298,7 +303,13 @@ bot.command("config", async (ctx) => {
   if (args.startsWith("reset ")) {
     const key = args.slice(6).trim()
     if (!runtimeConfig.isValidKey(key)) {
-      await ctx.reply(`❌ Chiave sconosciuta: \`${key}\`\n\nChiavi valide: ${runtimeConfig.getAllDefinitions().map(d => d.key).join(", ")}`, { parse_mode: "Markdown" })
+      await ctx.reply(
+        `❌ Chiave sconosciuta: \`${key}\`\n\nChiavi valide: ${runtimeConfig
+          .getAllDefinitions()
+          .map((d) => d.key)
+          .join(", ")}`,
+        { parse_mode: "Markdown" }
+      )
       return
     }
     const { oldValue, defaultValue } = runtimeConfig.reset(key as RuntimeConfigKey)
@@ -310,7 +321,13 @@ bot.command("config", async (ctx) => {
   const key = parts[0]
 
   if (!runtimeConfig.isValidKey(key)) {
-    await ctx.reply(`❌ Chiave sconosciuta: \`${key}\`\n\nChiavi valide: ${runtimeConfig.getAllDefinitions().map(d => d.key).join(", ")}`, { parse_mode: "Markdown" })
+    await ctx.reply(
+      `❌ Chiave sconosciuta: \`${key}\`\n\nChiavi valide: ${runtimeConfig
+        .getAllDefinitions()
+        .map((d) => d.key)
+        .join(", ")}`,
+      { parse_mode: "Markdown" }
+    )
     return
   }
 
@@ -337,7 +354,9 @@ bot.command("config", async (ctx) => {
   const value = parts.slice(1).join(" ")
   try {
     const { oldValue, newValue } = runtimeConfig.set(key as RuntimeConfigKey, value)
-    await ctx.reply(`✅ \`${key}\` aggiornato\n\n\`${oldValue || '""'}\` → \`${newValue || '""'}\``, { parse_mode: "Markdown" })
+    await ctx.reply(`✅ \`${key}\` aggiornato\n\n\`${oldValue || '""'}\` → \`${newValue || '""'}\``, {
+      parse_mode: "Markdown",
+    })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     await ctx.reply(`❌ Errore: ${msg}`, { parse_mode: "Markdown" })
@@ -374,7 +393,6 @@ bot.on("message:text", async (ctx) => {
       await sendLong(ctx, result.text)
       await ctx.reply(formatMeta(result), { parse_mode: "Markdown" })
       await persistSession(chatId, agent)
-
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error("Text call failed", { chatId, error: msg })
@@ -422,18 +440,12 @@ bot.on("message:photo", async (ctx) => {
         tokenUsage: result.tokenUsage,
       })
       if (messageId) {
-        history.addAttachment(
-          messageId,
-          mediaType,
-          Buffer.from(base64, "base64"),
-          largest.file_id
-        )
+        history.addAttachment(messageId, mediaType, Buffer.from(base64, "base64"), largest.file_id)
       }
 
       await sendLong(ctx, result.text)
       await ctx.reply(formatMeta(result), { parse_mode: "Markdown" })
       await persistSession(chatId, agent)
-
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       logger.error("Photo call failed", { chatId, error: msg })

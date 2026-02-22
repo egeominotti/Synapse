@@ -105,16 +105,16 @@ All config via environment variables loaded in `src/config.ts`. Required: `CLAUD
 
 Admin can change these at runtime via `/config <key> <value>`:
 
-| Key | Type | Default | Range/Enum |
-|-----|------|---------|------------|
-| `system_prompt` | string | `""` | — |
-| `timeout_ms` | number | `120000` | 5000–600000 |
-| `max_retries` | number | `3` | 0–10 |
-| `retry_delay_ms` | number | `1000` | 100–30000 |
-| `skip_permissions` | boolean | `true` | true/false |
-| `log_level` | string | `INFO` | DEBUG, INFO, WARN, ERROR |
-| `docker` | boolean | `false` | true/false |
-| `docker_image` | string | `claude-agent:latest` | — |
+| Key                | Type    | Default               | Range/Enum               |
+| ------------------ | ------- | --------------------- | ------------------------ |
+| `system_prompt`    | string  | `""`                  | —                        |
+| `timeout_ms`       | number  | `120000`              | 5000–600000              |
+| `max_retries`      | number  | `3`                   | 0–10                     |
+| `retry_delay_ms`   | number  | `1000`                | 100–30000                |
+| `skip_permissions` | boolean | `true`                | true/false               |
+| `log_level`        | string  | `INFO`                | DEBUG, INFO, WARN, ERROR |
+| `docker`           | boolean | `false`               | true/false               |
+| `docker_image`     | string  | `claude-agent:latest` | —                        |
 
 Changes are validated, persisted in SQLite, and applied immediately. They survive restarts.
 

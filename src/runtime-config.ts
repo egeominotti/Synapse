@@ -113,14 +113,22 @@ export class RuntimeConfig {
   /** Get the current value for a key (from agentConfig) */
   get(key: RuntimeConfigKey): string {
     switch (key) {
-      case "system_prompt": return this.config.systemPrompt ?? ""
-      case "timeout_ms": return String(this.config.timeoutMs)
-      case "max_retries": return String(this.config.maxRetries)
-      case "retry_delay_ms": return String(this.config.initialRetryDelayMs)
-      case "skip_permissions": return String(this.config.skipPermissions)
-      case "log_level": return Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO"
-      case "docker": return String(this.config.useDocker)
-      case "docker_image": return this.config.dockerImage
+      case "system_prompt":
+        return this.config.systemPrompt ?? ""
+      case "timeout_ms":
+        return String(this.config.timeoutMs)
+      case "max_retries":
+        return String(this.config.maxRetries)
+      case "retry_delay_ms":
+        return String(this.config.initialRetryDelayMs)
+      case "skip_permissions":
+        return String(this.config.skipPermissions)
+      case "log_level":
+        return Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO"
+      case "docker":
+        return String(this.config.useDocker)
+      case "docker_image":
+        return this.config.dockerImage
     }
   }
 

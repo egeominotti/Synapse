@@ -218,9 +218,9 @@ describe("RuntimeConfig getAll", () => {
     const rc = new RuntimeConfig(db, config)
     const all = rc.getAll()
     expect(all.length).toBe(8)
-    expect(all.map(a => a.key)).toContain("timeout_ms")
-    expect(all.map(a => a.key)).toContain("system_prompt")
-    expect(all.map(a => a.key)).toContain("log_level")
+    expect(all.map((a) => a.key)).toContain("timeout_ms")
+    expect(all.map((a) => a.key)).toContain("system_prompt")
+    expect(all.map((a) => a.key)).toContain("log_level")
   })
 
   it("isValidKey works", () => {

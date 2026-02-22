@@ -23,9 +23,9 @@ afterEach(() => {
 
 describe("Database schema", () => {
   it("creates all tables", () => {
-    const tables = db.db
-      .query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-      .all() as Array<{ name: string }>
+    const tables = db.db.query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
+      name: string
+    }>
     const names = tables.map((t) => t.name)
     expect(names).toContain("sessions")
     expect(names).toContain("messages")

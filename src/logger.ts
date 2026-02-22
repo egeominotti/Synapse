@@ -45,9 +45,7 @@ class Logger {
     const sessionTag = this.sessionId ? ` [sid:${this.sessionId.slice(0, 8)}]` : ""
     const metaStr = meta ? ` ${JSON.stringify(meta)}` : ""
 
-    process.stderr.write(
-      `${color}[${ts}] [${level}]${sessionTag} ${message}${metaStr}${RESET}\n`
-    )
+    process.stderr.write(`${color}[${ts}] [${level}]${sessionTag} ${message}${metaStr}${RESET}\n`)
   }
 
   debug(message: string, meta?: Record<string, unknown>): void {

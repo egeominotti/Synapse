@@ -56,7 +56,7 @@ async function main(): Promise<void> {
     if (isShuttingDown) return
     isShuttingDown = true
 
-    repl.stopSpinner()   // clear any in-flight spinner before writing output
+    repl.stopSpinner() // clear any in-flight spinner before writing output
     process.stdout.write("\n")
     logger.info(`Received ${signal}, shutting down gracefully`)
 
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
     if (stats && stats.totalMessages > 0) {
       process.stdout.write(
         `\n\x1b[90m[Sessione terminata: ${stats.totalMessages} messaggi, ` +
-        `durata totale ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
+          `durata totale ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
       )
     }
 
@@ -86,7 +86,11 @@ async function main(): Promise<void> {
   const crashHandler = (err: unknown, origin: string): void => {
     process.stdout.write("\x1b[?25h") // restore cursor synchronously
     process.stderr.write(`\n[FATAL] ${origin}: ${String(err)}\n`)
-    try { db.close() } catch {}
+    try {
+      db.close()
+    } catch {
+      /* already closing */
+    }
     process.exit(1)
   }
   process.on("uncaughtException", (err) => crashHandler(err, "uncaughtException"))
@@ -107,7 +111,7 @@ async function main(): Promise<void> {
   if (stats && stats.totalMessages > 0) {
     process.stdout.write(
       `\n\x1b[90m[Sessione terminata: ${stats.totalMessages} messaggi, ` +
-      `durata totale ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
+        `durata totale ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
     )
   }
 

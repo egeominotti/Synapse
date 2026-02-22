@@ -36,20 +36,20 @@ cp .env.example .env  # edit with your tokens
 
 ### Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `CLAUDE_CODE_OAUTH_TOKEN` | Yes | — | Claude CLI auth token |
-| `TELEGRAM_BOT_TOKEN` | Bot only | — | Telegram bot token from @BotFather |
-| `TELEGRAM_ADMIN_ID` | No | — | Telegram chat ID for admin access (`/config`) |
-| `CLAUDE_AGENT_SYSTEM_PROMPT` | No | `""` | Custom agent persona/instructions |
-| `CLAUDE_AGENT_TIMEOUT_MS` | No | `120000` | Max response time (ms) |
-| `CLAUDE_AGENT_MAX_RETRIES` | No | `3` | Retry attempts on transient errors |
-| `CLAUDE_AGENT_RETRY_DELAY_MS` | No | `1000` | Initial retry backoff (ms) |
-| `CLAUDE_AGENT_DB_PATH` | No | `~/.claude-agent/neo.db` | SQLite database path |
-| `CLAUDE_AGENT_LOG_LEVEL` | No | `INFO` | `DEBUG` \| `INFO` \| `WARN` \| `ERROR` |
-| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No | `1` | Skip CLI permission prompts |
-| `CLAUDE_AGENT_DOCKER` | No | `0` | Run in Docker containers |
-| `CLAUDE_AGENT_DOCKER_IMAGE` | No | `claude-agent:latest` | Docker image name |
+| Variable                        | Required | Default                  | Description                                   |
+| ------------------------------- | -------- | ------------------------ | --------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`       | Yes      | —                        | Claude CLI auth token                         |
+| `TELEGRAM_BOT_TOKEN`            | Bot only | —                        | Telegram bot token from @BotFather            |
+| `TELEGRAM_ADMIN_ID`             | No       | —                        | Telegram chat ID for admin access (`/config`) |
+| `CLAUDE_AGENT_SYSTEM_PROMPT`    | No       | `""`                     | Custom agent persona/instructions             |
+| `CLAUDE_AGENT_TIMEOUT_MS`       | No       | `120000`                 | Max response time (ms)                        |
+| `CLAUDE_AGENT_MAX_RETRIES`      | No       | `3`                      | Retry attempts on transient errors            |
+| `CLAUDE_AGENT_RETRY_DELAY_MS`   | No       | `1000`                   | Initial retry backoff (ms)                    |
+| `CLAUDE_AGENT_DB_PATH`          | No       | `~/.claude-agent/neo.db` | SQLite database path                          |
+| `CLAUDE_AGENT_LOG_LEVEL`        | No       | `INFO`                   | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`        |
+| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No       | `1`                      | Skip CLI permission prompts                   |
+| `CLAUDE_AGENT_DOCKER`           | No       | `0`                      | Run in Docker containers                      |
+| `CLAUDE_AGENT_DOCKER_IMAGE`     | No       | `claude-agent:latest`    | Docker image name                             |
 
 ## Usage
 
@@ -61,16 +61,16 @@ bun run index.ts
 
 #### Slash Commands
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/image <path> [prompt]` | Analyze an image |
-| `/history` | Show last 5 exchanges |
-| `/sessions` | List saved sessions |
-| `/load <session_id>` | Resume a session |
-| `/stats` | Session statistics |
-| `/reset` | Start fresh conversation |
-| `/exit` | Quit |
+| Command                  | Description              |
+| ------------------------ | ------------------------ |
+| `/help`                  | Show available commands  |
+| `/image <path> [prompt]` | Analyze an image         |
+| `/history`               | Show last 5 exchanges    |
+| `/sessions`              | List saved sessions      |
+| `/load <session_id>`     | Resume a session         |
+| `/stats`                 | Session statistics       |
+| `/reset`                 | Start fresh conversation |
+| `/exit`                  | Quit                     |
 
 ### Telegram Bot
 
@@ -80,12 +80,12 @@ bun run telegram.ts
 
 #### Bot Commands
 
-| Command | Description |
-|---------|-------------|
-| `/start` | Welcome message |
-| `/help` | Available commands |
-| `/reset` | Clear session |
-| `/stats` | Session statistics |
+| Command   | Description                        |
+| --------- | ---------------------------------- |
+| `/start`  | Welcome message                    |
+| `/help`   | Available commands                 |
+| `/reset`  | Clear session                      |
+| `/stats`  | Session statistics                 |
 | `/config` | Runtime configuration (admin only) |
 
 Send photos with optional captions for vision analysis.
@@ -104,16 +104,16 @@ Set `TELEGRAM_ADMIN_ID` to your Telegram chat ID. Then use:
 
 **Configurable parameters:**
 
-| Key | Type | Default | Range |
-|-----|------|---------|-------|
-| `system_prompt` | string | `""` | — |
-| `timeout_ms` | number | `120000` | 5000–600000 |
-| `max_retries` | number | `3` | 0–10 |
-| `retry_delay_ms` | number | `1000` | 100–30000 |
-| `skip_permissions` | boolean | `true` | — |
-| `log_level` | string | `INFO` | DEBUG/INFO/WARN/ERROR |
-| `docker` | boolean | `false` | — |
-| `docker_image` | string | `claude-agent:latest` | — |
+| Key                | Type    | Default               | Range                 |
+| ------------------ | ------- | --------------------- | --------------------- |
+| `system_prompt`    | string  | `""`                  | —                     |
+| `timeout_ms`       | number  | `120000`              | 5000–600000           |
+| `max_retries`      | number  | `3`                   | 0–10                  |
+| `retry_delay_ms`   | number  | `1000`                | 100–30000             |
+| `skip_permissions` | boolean | `true`                | —                     |
+| `log_level`        | string  | `INFO`                | DEBUG/INFO/WARN/ERROR |
+| `docker`           | boolean | `false`               | —                     |
+| `docker_image`     | string  | `claude-agent:latest` | —                     |
 
 Changes are validated, persisted in SQLite, and applied immediately. They survive bot restarts.
 

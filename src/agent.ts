@@ -56,8 +56,9 @@ export function buildSpawnEnv(token: string): Record<string, string> {
   if (_cachedEnv && _cachedToken === token) return _cachedEnv
   const { CLAUDECODE: _stripped, ...rest } = Bun.env
   _cachedEnv = Object.fromEntries(
-    Object.entries({ ...rest, CLAUDE_CODE_OAUTH_TOKEN: token })
-      .filter((entry): entry is [string, string] => entry[1] !== undefined)
+    Object.entries({ ...rest, CLAUDE_CODE_OAUTH_TOKEN: token }).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined
+    )
   )
   _cachedToken = token
   return _cachedEnv
@@ -71,7 +72,9 @@ export class Agent {
     this.config = config
   }
 
-  getSessionId(): string | null { return this.sessionId }
+  getSessionId(): string | null {
+    return this.sessionId
+  }
 
   setSessionId(id: string | null): void {
     this.sessionId = id
@@ -158,7 +161,6 @@ export class Agent {
 
   /** Core vision spawn — accepts pre-computed base64 data. */
   private async spawnWithRawImage(mediaType: string, imageData: string, prompt: string): Promise<AgentCallResult> {
-
     logger.debug("Spawning claude (vision)", {
       mode: this.config.useDocker ? "docker" : "direct",
       hasSession: !!this.sessionId,
@@ -205,12 +207,13 @@ export class Agent {
     vision: { mediaType: string; data: string } | null
   }): Promise<AgentCallResult> {
     const dockerArgs = [
-      "docker", "run",
-      "--rm",           // auto-remove container after exit
-      "--interactive",  // keep stdin open
+      "docker",
+      "run",
+      "--rm", // auto-remove container after exit
+      "--interactive", // keep stdin open
       "--network=host", // needed for claude CLI to reach Anthropic API
-      "--memory=512m",  // cap memory per container
-      "--cpus=1",       // cap CPU per container
+      "--memory=512m", // cap memory per container
+      "--cpus=1", // cap CPU per container
       this.config.dockerImage,
     ]
 
@@ -246,8 +249,7 @@ export class Agent {
     // we sequentially wait for stdout, the child blocks and deadlocks.
     // Cast required because Bun's generic spawn return type is a union that
     // includes `number` for non-piped streams; we always set stdout/stderr:"pipe".
-    const readText = (s: unknown): Promise<string> =>
-      new Response(s as ReadableStream<Uint8Array>).text()
+    const readText = (s: unknown): Promise<string> => new Response(s as ReadableStream<Uint8Array>).text()
     const readPromise = Promise.all([readText(proc.stdout), readText(proc.stderr)])
 
     let timedOut = false
@@ -300,7 +302,11 @@ export class Agent {
     if (lines.length > 1) {
       for (const line of lines) {
         let obj: Record<string, unknown>
-        try { obj = JSON.parse(line) } catch { continue }
+        try {
+          obj = JSON.parse(line)
+        } catch {
+          continue
+        }
         if (obj.type !== "result") continue
 
         const parsed = obj as unknown as ClaudeResponse & { type: string }
@@ -309,7 +315,10 @@ export class Agent {
           ? { inputTokens: parsed.usage.input_tokens ?? 0, outputTokens: parsed.usage.output_tokens ?? 0 }
           : null
         const text = parsed.result ?? trimmed
-        logger.debug("Claude response received (stream-json)", { resultLength: text.length, hasTokenUsage: !!tokenUsage })
+        logger.debug("Claude response received (stream-json)", {
+          resultLength: text.length,
+          hasTokenUsage: !!tokenUsage,
+        })
         return { text, sessionId: this.sessionId, tokenUsage }
       }
       logger.warn("stream-json: no result event found, returning raw stdout")
