@@ -128,8 +128,8 @@ async function downloadFileAsBase64(
   fileId: string
 ): Promise<{ base64: string; mediaType: string }> {
   const file = await ctx.api.getFile(fileId)
-  const filePath = file.file_path!
-  const url = `https://api.telegram.org/file/bot${botToken}/${filePath}`
+  if (!file.file_path) throw new Error("Telegram returned no file_path for this file")
+  const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`
 
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Failed to download file: ${res.status}`)
@@ -149,7 +149,7 @@ async function downloadFileAsBase64(
   }
   const base64 = Buffer.from(buffer).toString("base64")
 
-  const ext = filePath.split(".").pop()?.toLowerCase() ?? ""
+  const ext = file.file_path.split(".").pop()?.toLowerCase() ?? ""
   const mediaTypeMap: Record<string, string> = {
     jpg: "image/jpeg",
     jpeg: "image/jpeg",
@@ -281,7 +281,8 @@ async function downloadFileToSandbox(
   agent: Agent
 ): Promise<string> {
   const file = await ctx.api.getFile(fileId)
-  const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path!}`
+  if (!file.file_path) throw new Error("Telegram returned no file_path for this file")
+  const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path}`
 
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Download failed: ${res.status}`)

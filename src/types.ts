@@ -68,7 +68,7 @@ export interface AgentConfig {
   mcpConfigPath?: string
   /** Path to whisper.cpp GGML model file — enables voice transcription if set */
   whisperModelPath?: string
-  /** Whisper language code (ISO 639-1, default: "it") */
+  /** Whisper language code (ISO 639-1, default: "auto") */
   whisperLanguage?: string
   /** CPU threads for whisper transcription (default: 4) */
   whisperThreads?: number

@@ -326,7 +326,7 @@ export class Agent {
         role: "user",
         content: [
           { type: "image", source: { type: "base64", media_type: mediaType, data: imageData } },
-          { type: "text", text: prompt || "Cosa vedi in questa immagine?" },
+          { type: "text", text: prompt || "What do you see in this image?" },
         ],
       },
     }

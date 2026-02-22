@@ -79,6 +79,7 @@ const MAX_AGENTS = 500
 const agentPools = new Map<number, AgentPool>()
 const histories = new Map<number, HistoryManager>()
 const chatQueue = new ChatQueue(agentConfig.maxConcurrentPerChat)
+runtimeConfig.setOnMaxConcurrentChange((n) => chatQueue.setMaxConcurrency(n))
 const botStartedAt = Date.now()
 
 function getAgentPool(chatId: number): AgentPool {
@@ -279,6 +280,14 @@ const shutdown = async (signal: string): Promise<void> => {
   healthMonitor.stop()
   // scheduler.stop()
   await bot.stop()
+
+  // Clean up all agent pool sandboxes (temp directories)
+  for (const [chatId, pool] of agentPools) {
+    pool.cleanup()
+    logger.debug("Agent pool cleaned up on shutdown", { chatId })
+  }
+  agentPools.clear()
+
   db.close()
   process.exit(0)
 }
@@ -314,7 +323,7 @@ bot.start({
 
     // Send startup message to all known chats
     if (knownChatIds.length > 0) {
-      const uptime = new Date().toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+      const uptime = new Date().toLocaleString("en-US", { timeZone: "Europe/Rome" })
 
       const globalStats = db.getAllStats()
       for (const chatId of knownChatIds) {

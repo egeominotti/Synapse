@@ -14,10 +14,16 @@ type Task = () => Promise<void>
 export class ChatQueue {
   private readonly semaphores = new Map<number, Semaphore>()
   private readonly pending = new Map<number, number>()
-  private readonly maxConcurrency: number
+  private maxConcurrency: number
 
   constructor(maxConcurrency = 1) {
     this.maxConcurrency = maxConcurrency
+  }
+
+  /** Update the max concurrency. New semaphores will use this value. */
+  setMaxConcurrency(n: number): void {
+    this.maxConcurrency = n
+    logger.info("ChatQueue max concurrency updated", { maxConcurrency: n })
   }
 
   /**

@@ -82,6 +82,7 @@ export class RuntimeConfig {
   private readonly db: Database
   private readonly config: AgentConfig
   private readonly definitions: Map<RuntimeConfigKey, ConfigDefinition>
+  private onMaxConcurrentChange?: (n: number) => void
 
   constructor(db: Database, config: AgentConfig) {
     this.db = db
@@ -91,6 +92,11 @@ export class RuntimeConfig {
     this.definitions = new Map(defs.map((d) => [d.key, d]))
 
     this.loadFromDb()
+  }
+
+  /** Register a callback for when max_concurrent changes (used to sync ChatQueue) */
+  setOnMaxConcurrentChange(cb: (n: number) => void): void {
+    this.onMaxConcurrentChange = cb
   }
 
   /** Load persisted overrides from DB and apply to in-memory config */
@@ -264,6 +270,7 @@ export class RuntimeConfig {
         break
       case "max_concurrent":
         this.config.maxConcurrentPerChat = Number(value)
+        this.onMaxConcurrentChange?.(Number(value))
         break
     }
   }

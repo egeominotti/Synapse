@@ -141,7 +141,6 @@ export class AgentPool {
 
   /** Clean up all agents (master + workers) — used by /reset and LRU eviction */
   cleanup(): void {
-    this.masterSlot.agent.abort()
     this.masterSlot.agent.cleanup()
     for (const slot of this.workerSlots) {
       slot.agent.cleanup()
