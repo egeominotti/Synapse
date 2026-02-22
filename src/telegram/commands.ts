@@ -46,6 +46,11 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
 
   bot.command("reset", async (ctx) => {
     const chatId = ctx.chat.id
+    const agent = deps.agents.get(chatId)
+    if (agent) {
+      agent.abort() // Kill any running process to unblock the queue
+      agent.cleanup()
+    }
     deps.agents.delete(chatId)
     deps.histories.delete(chatId)
     await deps.store.delete(chatId)

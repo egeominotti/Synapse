@@ -11,6 +11,9 @@ import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage, StreamEv
 import { logger } from "./logger"
 import { createSandbox, cleanupSandbox, listSandboxFiles, buildSpawnEnv, MIME_TYPES } from "./sandbox"
 
+/** Hard safety timeout: kills process even if timeout_ms = 0 (disabled). Prevents infinite hangs. */
+const HARD_TIMEOUT_MS = 5 * 60 * 1_000 // 5 minutes
+
 /** Errors that are considered transient and safe to retry */
 const TRANSIENT_PATTERNS = [
   "ETIMEDOUT",
@@ -44,6 +47,8 @@ export class Agent {
   private sessionId: string | null = null
   /** Isolated sandbox directory — Claude runs here, not in the project root */
   readonly sandboxDir: string
+  /** Currently running process — tracked so it can be killed via abort() */
+  private activeProc: ReturnType<typeof Bun.spawn> | null = null
 
   constructor(config: AgentConfig) {
     this.config = config
@@ -57,7 +62,21 @@ export class Agent {
 
   /** Remove the sandbox directory. Call before discarding the agent. */
   cleanup(): void {
+    this.abort()
     cleanupSandbox(this.sandboxDir)
+  }
+
+  /** Kill the currently running Claude process (if any). Unblocks pending calls. */
+  abort(): void {
+    if (this.activeProc) {
+      try {
+        this.activeProc.kill()
+        logger.info("Active process killed via abort()")
+      } catch {
+        /* already dead */
+      }
+      this.activeProc = null
+    }
   }
 
   getSessionId(): string | null {
@@ -160,18 +179,17 @@ export class Agent {
       stdout: "pipe",
       stderr: "pipe",
     })
+    this.activeProc = proc
 
     const startTime = performance.now()
 
-    // Set up timeout
+    // Use configured timeout, or hard safety timeout to prevent infinite hangs
+    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
     let timedOut = false
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
-    if (this.config.timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        timedOut = true
-        proc.kill()
-      }, this.config.timeoutMs)
-    }
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true
+      proc.kill()
+    }, effectiveTimeout)
 
     // Read stderr concurrently (non-blocking)
     const stderrPromise = new Response(proc.stderr as ReadableStream<Uint8Array>).text()
@@ -233,10 +251,11 @@ export class Agent {
         }
       }
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle)
+      clearTimeout(timeoutHandle)
+      this.activeProc = null
     }
 
-    if (timedOut) throw new TimeoutError(this.config.timeoutMs)
+    if (timedOut) throw new TimeoutError(effectiveTimeout)
 
     const stderrText = await stderrPromise
     const exitCode = await proc.exited
@@ -352,29 +371,31 @@ export class Agent {
    * Reads stdout and stderr CONCURRENTLY to prevent pipe deadlock.
    */
   private async raceWithTimeout(proc: ReturnType<typeof Bun.spawn>): Promise<AgentCallResult> {
+    this.activeProc = proc
     const startTime = performance.now()
 
     const readText = (s: unknown): Promise<string> => new Response(s as ReadableStream<Uint8Array>).text()
     const readPromise = Promise.all([readText(proc.stdout), readText(proc.stderr)])
 
+    // Use configured timeout, or hard safety timeout to prevent infinite hangs
+    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
+
     let timedOut = false
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null
-    if (this.config.timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => {
-        timedOut = true
-        proc.kill()
-      }, this.config.timeoutMs)
-    }
+    const timeoutHandle = setTimeout(() => {
+      timedOut = true
+      proc.kill()
+    }, effectiveTimeout)
 
     let rawStdout: string
     let stderrText: string
     try {
       ;[rawStdout, stderrText] = await readPromise
     } finally {
-      if (timeoutHandle) clearTimeout(timeoutHandle)
+      clearTimeout(timeoutHandle)
+      this.activeProc = null
     }
 
-    if (timedOut) throw new TimeoutError(this.config.timeoutMs)
+    if (timedOut) throw new TimeoutError(effectiveTimeout)
 
     const exitCode = await proc.exited
     const durationMs = Math.round(performance.now() - startTime)
