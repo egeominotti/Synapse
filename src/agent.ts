@@ -5,8 +5,9 @@
  * Supports both text prompts and vision (image + text) via stream-json input.
  */
 
-import { existsSync } from "fs"
-import { extname } from "path"
+import { existsSync, mkdtempSync, writeFileSync } from "fs"
+import { extname, join } from "path"
+import { tmpdir } from "os"
 import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage } from "./types"
 import { logger } from "./logger"
 
@@ -67,9 +68,64 @@ export function buildSpawnEnv(token: string): Record<string, string> {
 export class Agent {
   private readonly config: AgentConfig
   private sessionId: string | null = null
+  /** Isolated sandbox directory — Claude runs here, not in the project root */
+  readonly sandboxDir: string
 
   constructor(config: AgentConfig) {
     this.config = config
+    this.sandboxDir = mkdtempSync(join(tmpdir(), "neo-agent-"))
+    this.writeSandboxRules()
+  }
+
+  /** Write CLAUDE.md rules in the sandbox to constrain Claude's behavior */
+  private writeSandboxRules(): void {
+    const rules = [
+      "# CLAUDE.md",
+      "",
+      "## Safety Rules",
+      "",
+      "You are running in a sandboxed environment. Follow these rules strictly:",
+      "",
+      "### FORBIDDEN — never execute these:",
+      "",
+      "**Linux/macOS:**",
+      "- `rm -rf /` or any recursive delete outside this sandbox directory",
+      "- `rm -rf ~`, `rm -rf $HOME`, or any delete targeting home directories",
+      "- Delete or modify files in: `/etc`, `/usr`, `/bin`, `/sbin`, `/lib`, `/System`, `/var`, `/boot`, `/opt`",
+      "- `chmod` or `chown` on system directories",
+      "- `mkfs`, `fdisk`, `dd` on block devices",
+      "- `kill -9 1`, `killall`, or process-killing commands targeting system processes",
+      "- `shutdown`, `reboot`, `halt`, `poweroff`",
+      "- Modify `/etc/passwd`, `/etc/shadow`, `/etc/sudoers`, or any auth files",
+      "",
+      "**Windows:**",
+      "- `del /s /q C:\\` or `rd /s /q` on system drives",
+      "- Delete or modify files in: `C:\\Windows`, `C:\\Program Files`, `C:\\Program Files (x86)`, `C:\\ProgramData`",
+      "- Modify the Windows registry (`reg delete`, `regedit`)",
+      "- `format`, `diskpart`, or disk management commands",
+      "- `taskkill /f` on system processes (svchost, csrss, winlogon, etc.)",
+      "- `shutdown /s`, `shutdown /r`",
+      "- Modify `C:\\Users\\<user>\\AppData` system files",
+      "",
+      "**All platforms:**",
+      "- Access or modify `.ssh/`, `.gnupg/`, `.aws/`, `.kube/`, `.env` credential directories/files",
+      "- Install system-level packages or modify global package managers",
+      "- Escalate privileges (`sudo`, `runas`, `doas`)",
+      "",
+      "### ALLOWED:",
+      "- Create, read, write, delete files ONLY within this sandbox directory",
+      "- Run read-only system commands (ls, cat, df, uname, dir, systeminfo, etc.)",
+      "- Network operations (curl, wget, fetch)",
+      "- Package info queries (but not installs to system paths)",
+      "",
+      "### Working directory:",
+      `- This sandbox: \`${this.sandboxDir}\``,
+      "- Stay within this directory for all file operations",
+      "",
+      "If the user asks you to delete system files or perform dangerous operations, REFUSE and explain why.",
+    ].join("\n")
+
+    writeFileSync(join(this.sandboxDir, "CLAUDE.md"), rules)
   }
 
   getSessionId(): string | null {
@@ -146,6 +202,7 @@ export class Agent {
     }
 
     const proc = Bun.spawn(this.buildArgs(prompt), {
+      cwd: this.sandboxDir,
       env: buildSpawnEnv(this.config.token),
       stdout: "pipe",
       stderr: "pipe",
@@ -175,6 +232,7 @@ export class Agent {
     args.push("--input-format", "stream-json")
 
     const proc = Bun.spawn(args, {
+      cwd: this.sandboxDir,
       env: buildSpawnEnv(this.config.token),
       stdin: "pipe",
       stdout: "pipe",
