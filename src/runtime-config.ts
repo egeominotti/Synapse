@@ -21,9 +21,9 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
     {
       key: "timeout_ms",
       type: "number",
-      description: "Timeout per chiamata (ms)",
+      description: "Timeout per chiamata (ms, 0 = disabilitato)",
       defaultValue: String(defaults.timeoutMs),
-      min: 5_000,
+      min: 0,
       max: 600_000,
     },
     {
@@ -197,6 +197,10 @@ export class RuntimeConfig {
       case "number": {
         const n = Number(rawValue)
         if (!Number.isFinite(n)) throw new Error(`"${rawValue}" non e' un numero valido`)
+        // timeout_ms: allow 0 (disabled) or >= 5000
+        if (def.key === "timeout_ms" && n !== 0 && n < 5_000) {
+          throw new Error("Usa 0 per disabilitare, oppure un valore >= 5000 ms")
+        }
         if (def.min !== undefined && n < def.min) throw new Error(`Valore minimo: ${def.min}`)
         if (def.max !== undefined && n > def.max) throw new Error(`Valore massimo: ${def.max}`)
         return String(n)

@@ -167,6 +167,7 @@ const scheduler = new Scheduler(db, async (job) => {
 
   const after = agent.listSandboxFiles()
   const newFiles = after.filter((f) => {
+    if (!f.path.startsWith("output/")) return false
     const prevMtime = before.get(f.path)
     return prevMtime === undefined || f.mtimeMs > prevMtime
   })

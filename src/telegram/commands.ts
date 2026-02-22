@@ -32,6 +32,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       "/ping — stato del bot",
     ]
     if (deps.isAdmin(ctx.chat.id)) {
+      lines.push("/prompt — cambia il comportamento del bot (admin)")
       lines.push("/config — configurazione runtime (admin)")
     }
     lines.push(
@@ -258,6 +259,73 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       await ctx.reply(`✅ Job #${jobId} eliminato.`)
     } else {
       await ctx.reply(`❌ Job #${jobId} non trovato o non appartiene a questa chat.`)
+    }
+  })
+
+  // -------------------------------------------------------------------------
+  // Prompt (change bot behavior)
+  // -------------------------------------------------------------------------
+
+  bot.command("prompt", async (ctx) => {
+    const chatId = ctx.chat.id
+
+    if (!deps.isAdmin(chatId)) {
+      await ctx.reply("🔒 Non autorizzato. Solo l'admin puo' cambiare il comportamento.")
+      return
+    }
+
+    const text = ctx.message?.text ?? ""
+    const args = text.replace(/^\/prompt\s*/, "").trim()
+    const rc = deps.runtimeConfig
+
+    // Show current prompt
+    if (!args) {
+      const current = rc.get("system_prompt")
+      if (current) {
+        await ctx.reply(`🧠 *Prompt attuale:*\n\n_${current}_\n\n_Usa /prompt reset per tornare al default_`, {
+          parse_mode: "Markdown",
+        })
+      } else {
+        await ctx.reply("🧠 Nessun prompt personalizzato impostato.\n\nUsa `/prompt <testo>` per impostarne uno.", {
+          parse_mode: "Markdown",
+        })
+      }
+      return
+    }
+
+    // Reset prompt
+    if (args === "reset") {
+      rc.reset("system_prompt")
+
+      // Reset session so default takes effect immediately
+      const oldAgent = deps.agents.get(chatId)
+      if (oldAgent) oldAgent.cleanup()
+      deps.agents.delete(chatId)
+      deps.histories.delete(chatId)
+      await deps.store.delete(chatId)
+
+      await ctx.reply("✅ Prompt rimosso e sessione resettata.\n\nIl bot torna al comportamento predefinito.")
+      return
+    }
+
+    // Set new prompt
+    try {
+      const { oldValue } = rc.set("system_prompt", args)
+
+      // Reset session so new prompt takes effect immediately
+      const oldAgent = deps.agents.get(chatId)
+      if (oldAgent) oldAgent.cleanup()
+      deps.agents.delete(chatId)
+      deps.histories.delete(chatId)
+      await deps.store.delete(chatId)
+
+      const changed = oldValue ? `\n\n_Precedente: ${oldValue.slice(0, 100)}${oldValue.length > 100 ? "..." : ""}_` : ""
+      await ctx.reply(`✅ Prompt aggiornato e sessione resettata.${changed}\n\n🧠 _${args}_`, {
+        parse_mode: "Markdown",
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      await ctx.reply(`❌ Errore: ${msg}`)
     }
   })
 

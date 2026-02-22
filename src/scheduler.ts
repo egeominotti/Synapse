@@ -19,6 +19,7 @@ import { logger } from "./logger"
 
 const TICK_INTERVAL_MS = 60_000
 const MAX_JOBS_PER_CHAT = 20
+const MAX_CONSECUTIVE_FAILURES = 3
 const MS_PER_MINUTE = 60_000
 const MS_PER_HOUR = 3_600_000
 const MS_PER_DAY = 86_400_000
@@ -93,6 +94,7 @@ export class Scheduler {
   private readonly db: Database
   private readonly executor: JobExecutor
   private running = false
+  private readonly failureCounts = new Map<number, number>()
 
   constructor(db: Database, executor: JobExecutor) {
     this.db = db
@@ -147,6 +149,9 @@ export class Scheduler {
       try {
         await this.executor({ jobId: job.id, chatId: job.chat_id, prompt: job.prompt })
 
+        // Reset failure count on success
+        this.failureCounts.delete(job.id)
+
         // Compute next run (recurring → +interval, others → deactivate)
         let nextRunAt: string | null = null
         if (job.schedule_type === "recurring" && job.interval_ms) {
@@ -158,8 +163,27 @@ export class Scheduler {
         logger.info("Job executed", { jobId: job.id, chatId: job.chat_id, type: job.schedule_type })
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        logger.error("Job execution failed", { jobId: job.id, chatId: job.chat_id, error: msg })
-        // Don't deactivate on failure — retry next tick
+        const failures = (this.failureCounts.get(job.id) ?? 0) + 1
+        this.failureCounts.set(job.id, failures)
+
+        if (failures >= MAX_CONSECUTIVE_FAILURES) {
+          logger.error("Job deactivated after repeated failures", {
+            jobId: job.id,
+            chatId: job.chat_id,
+            failures,
+            error: msg,
+          })
+          this.db.updateJobAfterRun(job.id, null) // deactivate
+          this.failureCounts.delete(job.id)
+        } else {
+          logger.warn("Job execution failed, will retry", {
+            jobId: job.id,
+            chatId: job.chat_id,
+            failures,
+            maxFailures: MAX_CONSECUTIVE_FAILURES,
+            error: msg,
+          })
+        }
       }
     }
   }

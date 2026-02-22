@@ -120,10 +120,18 @@ describe("RuntimeConfig validation", () => {
     expect(() => rc.set("timeout_ms", "abc")).toThrow("non e' un numero valido")
   })
 
-  it("rejects value below min", () => {
+  it("rejects value below min (non-zero)", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("timeout_ms", "1000")).toThrow("Valore minimo: 5000")
+    expect(() => rc.set("timeout_ms", "1000")).toThrow("Usa 0 per disabilitare")
+  })
+
+  it("allows timeout_ms = 0 (disabled)", () => {
+    const config = makeConfig()
+    const rc = new RuntimeConfig(db, config)
+    const { newValue } = rc.set("timeout_ms", "0")
+    expect(newValue).toBe("0")
+    expect(config.timeoutMs).toBe(0)
   })
 
   it("rejects value above max", () => {

@@ -167,6 +167,9 @@ function isSessionError(errorMsg: string): boolean {
 }
 
 function resetAgentSession(chatId: number, deps: TelegramDeps): Agent {
+  const oldAgent = deps.agents.get(chatId)
+  if (oldAgent) oldAgent.cleanup()
+
   const agent = new Agent(deps.agentConfig)
   deps.agents.set(chatId, agent)
   deps.histories.delete(chatId)
