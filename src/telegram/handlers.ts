@@ -398,6 +398,9 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     const prompt = ctx.message.text
     if (prompt.startsWith("/")) return
 
+    // Immediate typing feedback — before queue, before anything
+    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
+
     // Detect free-text schedule intent
     const schedule = parseFreetextSchedule(prompt)
     if (schedule) {
@@ -437,6 +440,8 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     const caption = ctx.message.caption ?? "Cosa vedi in questa immagine?"
     const largest = ctx.message.photo[ctx.message.photo.length - 1]
 
+    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
+
     await deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Photo message", { chatId: ctx.chat.id, fileId: largest.file_id, caption })
 
@@ -463,6 +468,8 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     const doc = ctx.message.document
     const fileName = doc.file_name ?? "file"
     const caption = ctx.message.caption ?? `Analizza il file ${fileName}`
+
+    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
 
     await deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Document message", { chatId: ctx.chat.id, fileId: doc.file_id, fileName, size: doc.file_size })
