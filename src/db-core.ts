@@ -87,19 +87,35 @@ export class DatabaseCore {
       CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_active ON scheduled_jobs(active, run_at);
       CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_chat ON scheduled_jobs(chat_id);
     `)
+
+    // Migration: add chat_id column to sessions (idempotent)
+    try {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN chat_id INTEGER")
+      this.db.exec("CREATE INDEX IF NOT EXISTS idx_sessions_chat_id ON sessions(chat_id)")
+    } catch {
+      // Column already exists — ignore
+    }
   }
 
   // ---------------------------------------------------------------------------
   // Sessions
   // ---------------------------------------------------------------------------
 
-  upsertSession(sessionId: string): void {
+  upsertSession(sessionId: string, chatId?: number): void {
     const now = new Date().toISOString()
-    this.db.run(
-      `INSERT INTO sessions (session_id, created_at, updated_at) VALUES (?, ?, ?)
-       ON CONFLICT(session_id) DO UPDATE SET updated_at = ?`,
-      [sessionId, now, now, now]
-    )
+    if (chatId !== undefined) {
+      this.db.run(
+        `INSERT INTO sessions (session_id, created_at, updated_at, chat_id) VALUES (?, ?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET updated_at = ?, chat_id = COALESCE(?, chat_id)`,
+        [sessionId, now, now, chatId, now, chatId]
+      )
+    } else {
+      this.db.run(
+        `INSERT INTO sessions (session_id, created_at, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET updated_at = ?`,
+        [sessionId, now, now, now]
+      )
+    }
   }
 
   touchSession(sessionId: string): void {
@@ -177,6 +193,24 @@ export class DatabaseCore {
       input_tokens: number
       output_tokens: number
     }>
+  }
+
+  /** Get recent messages across ALL sessions for a given chat (for memory injection). */
+  getRecentMessagesByChatId(
+    chatId: number,
+    limit: number
+  ): Array<{ prompt: string; response: string; timestamp: string }> {
+    return this.db
+      .query(
+        `SELECT m.prompt, m.response, m.timestamp
+         FROM messages m
+         JOIN sessions s ON m.session_id = s.session_id
+         WHERE s.chat_id = ?
+         ORDER BY m.id DESC
+         LIMIT ?`
+      )
+      .all(chatId, limit)
+      .reverse() as Array<{ prompt: string; response: string; timestamp: string }>
   }
 
   // ---------------------------------------------------------------------------

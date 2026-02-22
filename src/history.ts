@@ -16,8 +16,8 @@ export class HistoryManager {
   }
 
   /** Initialize or switch to a session */
-  initSession(sessionId: string): void {
-    this.db.upsertSession(sessionId)
+  initSession(sessionId: string, chatId?: number): void {
+    this.db.upsertSession(sessionId, chatId)
     this.currentSessionId = sessionId
     logger.info("Session initialized", { sessionId: sessionId.slice(0, 8) })
   }

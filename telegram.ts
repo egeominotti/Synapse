@@ -24,6 +24,7 @@ import { formatForTelegram } from "./src/formatter"
 import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, buildMeta, snapshotSandbox, MAX_FILE_SIZE, type TelegramDeps } from "./src/telegram/handlers"
+import { buildMemoryContext } from "./src/memory"
 
 // ---------------------------------------------------------------------------
 // Init
@@ -73,13 +74,25 @@ function getAgent(chatId: number): Agent {
     return agent
   }
 
-  const agent = new Agent(agentConfig)
   const savedSessionId = store.get(chatId)
+  let agent: Agent
+
   if (savedSessionId) {
+    agent = new Agent(agentConfig)
     agent.setSessionId(savedSessionId)
     logger.info("Session restored from DB", { chatId, sessionId: savedSessionId.slice(0, 16) + "..." })
   } else {
-    logger.info("New agent created", { chatId })
+    // New session — inject conversation memory into system prompt
+    const recentMessages = db.getRecentMessagesByChatId(chatId, 30)
+    const memory = buildMemoryContext(recentMessages)
+    if (memory) {
+      const basePrompt = agentConfig.systemPrompt ?? ""
+      agent = new Agent({ ...agentConfig, systemPrompt: basePrompt + "\n\n" + memory })
+      logger.info("New agent with memory", { chatId, memoryMessages: recentMessages.length })
+    } else {
+      agent = new Agent(agentConfig)
+      logger.info("New agent created", { chatId })
+    }
   }
 
   if (agents.size >= MAX_AGENTS) {
@@ -102,7 +115,7 @@ function getHistory(chatId: number, agent: Agent): HistoryManager {
   const history = histories.get(chatId)!
   const sid = agent.getSessionId()
   if (sid && history.getCurrentSessionId() !== sid) {
-    history.initSession(sid)
+    history.initSession(sid, chatId)
   }
   return history
 }
