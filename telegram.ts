@@ -25,6 +25,8 @@ import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, buildMeta, snapshotSandbox, MAX_FILE_SIZE, type TelegramDeps } from "./src/telegram/handlers"
 import { buildMemoryContext } from "./src/memory"
+import { ensureMcpConfig } from "./src/mcp-config"
+import { dirname } from "path"
 
 // ---------------------------------------------------------------------------
 // Init
@@ -38,6 +40,12 @@ if (!botToken) {
 
 const agentConfig = loadConfig()
 logger.setMinLevel((Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO") as LogLevel)
+
+// Generate MCP config (Memory + Sequential Thinking) if not explicitly set
+if (!agentConfig.mcpConfigPath) {
+  agentConfig.mcpConfigPath = join(dirname(agentConfig.dbPath), "mcp.json")
+}
+ensureMcpConfig(agentConfig.mcpConfigPath)
 
 const db = new Database(agentConfig.dbPath)
 const store = new SessionStore(db)

@@ -391,6 +391,7 @@ export class Agent {
   buildArgs(inlinePrompt: string | null, outputFormat: "json" | "stream-json" = "json"): string[] {
     const args = ["claude", "--print", "--output-format", outputFormat]
     if (outputFormat === "stream-json") args.push("--verbose")
+    if (this.config.mcpConfigPath) args.push("--mcp-config", this.config.mcpConfigPath)
     if (this.config.skipPermissions) args.push("--dangerously-skip-permissions")
     if (this.sessionId) {
       args.push("--resume", this.sessionId)

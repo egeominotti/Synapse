@@ -64,6 +64,8 @@ export interface AgentConfig {
   dockerImage: string
   /** Optional system prompt that defines the agent's persona and capabilities */
   systemPrompt?: string
+  /** Path to MCP configuration file (auto-generated if not set) */
+  mcpConfigPath?: string
 }
 
 /** Result of a single agent call */

@@ -51,5 +51,6 @@ export function loadConfig(): AgentConfig {
     useDocker: Bun.env.CLAUDE_AGENT_DOCKER === "1",
     dockerImage: Bun.env.CLAUDE_AGENT_DOCKER_IMAGE ?? "claude-agent:latest",
     systemPrompt: Bun.env.CLAUDE_AGENT_SYSTEM_PROMPT || undefined,
+    mcpConfigPath: Bun.env.CLAUDE_AGENT_MCP_CONFIG_PATH || undefined,
   }
 }
