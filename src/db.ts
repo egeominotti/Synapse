@@ -68,11 +68,25 @@ export class Database {
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS scheduled_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        chat_id INTEGER NOT NULL,
+        prompt TEXT NOT NULL,
+        schedule_type TEXT NOT NULL CHECK(schedule_type IN ('once', 'recurring', 'delay')),
+        run_at TEXT NOT NULL,
+        interval_ms INTEGER,
+        created_at TEXT NOT NULL,
+        last_run_at TEXT,
+        active INTEGER NOT NULL DEFAULT 1
+      );
+
       CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
       CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
       CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id DESC);
       CREATE INDEX IF NOT EXISTS idx_telegram_sessions_session ON telegram_sessions(session_id);
       CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_active ON scheduled_jobs(active, run_at);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_chat ON scheduled_jobs(chat_id);
     `)
   }
 
@@ -367,6 +381,93 @@ export class Database {
 
   clearAllConfig(): void {
     this.db.run("DELETE FROM runtime_config")
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scheduled jobs
+  // ---------------------------------------------------------------------------
+
+  insertJob(
+    chatId: number,
+    prompt: string,
+    scheduleType: "once" | "recurring" | "delay",
+    runAt: string,
+    intervalMs?: number
+  ): number {
+    this.db.run(
+      `INSERT INTO scheduled_jobs (chat_id, prompt, schedule_type, run_at, interval_ms, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [chatId, prompt, scheduleType, runAt, intervalMs ?? null, new Date().toISOString()]
+    )
+    const row = this.db.query("SELECT last_insert_rowid() as id").get() as { id: number }
+    return row.id
+  }
+
+  getDueJobs(now: string): Array<{
+    id: number
+    chat_id: number
+    prompt: string
+    schedule_type: string
+    run_at: string
+    interval_ms: number | null
+  }> {
+    return this.db
+      .query(
+        `SELECT id, chat_id, prompt, schedule_type, run_at, interval_ms
+         FROM scheduled_jobs WHERE active = 1 AND run_at <= ? ORDER BY run_at ASC`
+      )
+      .all(now) as Array<{
+      id: number
+      chat_id: number
+      prompt: string
+      schedule_type: string
+      run_at: string
+      interval_ms: number | null
+    }>
+  }
+
+  updateJobAfterRun(jobId: number, nextRunAt: string | null): void {
+    const now = new Date().toISOString()
+    if (nextRunAt) {
+      this.db.run("UPDATE scheduled_jobs SET last_run_at = ?, run_at = ? WHERE id = ?", [now, nextRunAt, jobId])
+    } else {
+      this.db.run("UPDATE scheduled_jobs SET last_run_at = ?, active = 0 WHERE id = ?", [now, jobId])
+    }
+  }
+
+  getJobsByChat(chatId: number): Array<{
+    id: number
+    prompt: string
+    schedule_type: string
+    run_at: string
+    interval_ms: number | null
+    created_at: string
+  }> {
+    return this.db
+      .query(
+        `SELECT id, prompt, schedule_type, run_at, interval_ms, created_at
+         FROM scheduled_jobs WHERE chat_id = ? AND active = 1 ORDER BY run_at ASC`
+      )
+      .all(chatId) as Array<{
+      id: number
+      prompt: string
+      schedule_type: string
+      run_at: string
+      interval_ms: number | null
+      created_at: string
+    }>
+  }
+
+  deleteJob(jobId: number, chatId: number): boolean {
+    const result = this.db.run("DELETE FROM scheduled_jobs WHERE id = ? AND chat_id = ?", [jobId, chatId])
+    return result.changes > 0
+  }
+
+  countActiveJobs(chatId: number): number {
+    const row = this.db
+      .query("SELECT COUNT(*) as count FROM scheduled_jobs WHERE chat_id = ? AND active = 1")
+      .get(chatId) as { count: number }
+    return row.count
   }
 
   // ---------------------------------------------------------------------------

@@ -26,6 +26,7 @@ import { HistoryManager } from "./src/history"
 import { SessionStore } from "./src/session-store"
 import { RuntimeConfig } from "./src/runtime-config"
 import { ChatQueue } from "./src/chat-queue"
+import { Scheduler, parseSchedule } from "./src/scheduler"
 import { logger } from "./src/logger"
 import { formatForTelegram } from "./src/formatter"
 import type { AgentCallResult, LogLevel, RuntimeConfigKey } from "./src/types"
@@ -118,6 +119,34 @@ const chatQueue = new ChatQueue()
 
 // Bot start time for uptime tracking
 const botStartedAt = Date.now()
+
+// Scheduler: executes due jobs via Agent + sends response to chat
+const scheduler = new Scheduler(db, async (job) => {
+  const agent = getAgent(job.chatId)
+  const result = await agent.call(job.prompt)
+
+  // Persist message
+  const history = getHistory(job.chatId, agent)
+  await history.addMessage({
+    timestamp: new Date().toISOString(),
+    prompt: `[scheduled] ${job.prompt}`,
+    response: result.text,
+    durationMs: result.durationMs,
+    tokenUsage: result.tokenUsage,
+  })
+  await persistSession(job.chatId, agent)
+
+  // Send response to chat
+  const meta = buildMeta(result)
+  const { chunks, parseMode } = formatForTelegram(result.text, `⏰ ${meta}`)
+  for (const chunk of chunks) {
+    try {
+      await bot.api.sendMessage(job.chatId, chunk, parseMode ? { parse_mode: parseMode } : {})
+    } catch {
+      await bot.api.sendMessage(job.chatId, chunk)
+    }
+  }
+})
 
 /** Persist session after a successful call */
 async function persistSession(chatId: number, agent: Agent): Promise<void> {
@@ -216,6 +245,8 @@ bot.command("help", async (ctx) => {
     "/reset — resetta la conversazione",
     "/stats — statistiche sessione corrente",
     "/export — esporta conversazione come file",
+    "/schedule — programma un job schedulato",
+    "/jobs — lista job attivi",
     "/ping — stato del bot",
   ]
   if (isAdmin(ctx.chat.id)) {
@@ -335,6 +366,106 @@ bot.command("export", async (ctx) => {
   await ctx.replyWithDocument(new InputFile(buffer, filename), {
     caption: `📄 ${messages.length} messaggi esportati`,
   })
+})
+
+// ---------------------------------------------------------------------------
+// Schedule commands
+// ---------------------------------------------------------------------------
+
+bot.command("schedule", async (ctx) => {
+  const text = ctx.message?.text ?? ""
+  const args = text.replace(/^\/schedule\s*/, "").trim()
+
+  if (!args) {
+    await ctx.reply(
+      "⏰ *Uso:*\n\n" +
+        "`/schedule at 18:00 <prompt>` — una volta\n" +
+        "`/schedule every 09:00 <prompt>` — ricorrente\n" +
+        "`/schedule in 30m <prompt>` — dopo un delay\n\n" +
+        "Esempi:\n" +
+        "`/schedule at 18:00 Ricordami di chiamare Mario`\n" +
+        "`/schedule every 09:00 Buongiorno! Programmi per oggi?`\n" +
+        "`/schedule in 2h Controlla lo stato del deploy`",
+      { parse_mode: "Markdown" }
+    )
+    return
+  }
+
+  // Split: schedule expression + prompt
+  // Patterns: "at HH:MM ...", "every HH:MM ...", "in Nm ...", "in Nh ..."
+  const exprMatch = args.match(
+    /^((?:at|every|alle|ogni)\s+\d{1,2}:\d{2}|in\s+\d+\s*[mh](?:in|ore|ora|inuti)?)\s+(.+)$/i
+  )
+  if (!exprMatch) {
+    await ctx.reply("❌ Formato non valido.\n\nUsa: `/schedule at 18:00 <prompt>`, `/schedule in 30m <prompt>`", {
+      parse_mode: "Markdown",
+    })
+    return
+  }
+
+  const scheduleExpr = exprMatch[1]
+  const prompt = exprMatch[2]
+
+  try {
+    const spec = parseSchedule(scheduleExpr)
+    const jobId = scheduler.createJob(ctx.chat.id, prompt, spec)
+
+    const runAtStr = spec.runAt.toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+    const typeLabel = spec.type === "recurring" ? "🔄 Ricorrente" : spec.type === "delay" ? "⏳ Delay" : "📌 Una volta"
+
+    await ctx.reply(
+      `✅ Job #${jobId} creato\n\n` +
+        `${typeLabel}\n` +
+        `Prossima esecuzione: *${runAtStr}*\n` +
+        `Prompt: _${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}_`,
+      { parse_mode: "Markdown" }
+    )
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    await ctx.reply(`❌ ${msg}`)
+  }
+})
+
+bot.command("jobs", async (ctx) => {
+  const jobs = db.getJobsByChat(ctx.chat.id)
+
+  if (jobs.length === 0) {
+    await ctx.reply("📭 Nessun job attivo. Usa /schedule per crearne uno.")
+    return
+  }
+
+  const lines = [`⏰ *Job attivi (${jobs.length}):*\n`]
+
+  for (const job of jobs) {
+    const runAt = new Date(job.run_at).toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+    const typeEmoji = job.schedule_type === "recurring" ? "🔄" : job.schedule_type === "delay" ? "⏳" : "📌"
+    const promptPreview = job.prompt.slice(0, 60) + (job.prompt.length > 60 ? "..." : "")
+    lines.push(`${typeEmoji} *#${job.id}* — ${runAt}`)
+    lines.push(`  _${promptPreview}_\n`)
+  }
+
+  lines.push("Usa `/job delete <id>` per eliminare un job.")
+  await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+})
+
+bot.command("job", async (ctx) => {
+  const text = ctx.message?.text ?? ""
+  const args = text.replace(/^\/job\s*/, "").trim()
+
+  const deleteMatch = args.match(/^delete\s+(\d+)$/)
+  if (!deleteMatch) {
+    await ctx.reply("Uso: `/job delete <id>`", { parse_mode: "Markdown" })
+    return
+  }
+
+  const jobId = parseInt(deleteMatch[1], 10)
+  const deleted = db.deleteJob(jobId, ctx.chat.id)
+
+  if (deleted) {
+    await ctx.reply(`✅ Job #${jobId} eliminato.`)
+  } else {
+    await ctx.reply(`❌ Job #${jobId} non trovato o non appartiene a questa chat.`)
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -575,6 +706,7 @@ bot.catch((err) => {
 
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, stopping bot...`)
+  scheduler.stop()
   await bot.stop()
   db.close()
   process.exit(0)
@@ -587,6 +719,8 @@ process.on("SIGTERM", () => shutdown("SIGTERM"))
 await store.load()
 logger.info("Sessions loaded", { count: store.size })
 
+// Start scheduler and bot
+scheduler.start()
 logger.info("Bot polling started")
 bot.start({
   onStart: (info) => logger.info(`Bot online: @${info.username}`),
