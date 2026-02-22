@@ -11,7 +11,7 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Database**: SQLite via `bun:sqlite` (WAL mode)
 - **Telegram**: grammy v1.40+
 - **Scheduler**: croner (zero-dep cron library with second-level precision)
-- **Voice**: whisper.cpp via `whisper-cli` (optional, local speech-to-text)
+- **Voice**: Groq API (primary) + whisper-cli local (fallback), whisper-large-v3-turbo
 - **Testing**: bun:test (283 tests, 17 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
@@ -121,7 +121,7 @@ bun install
 - **No Claude SDK**: Agent spawns `claude` CLI with `--print --output-format json` flags
 - **Session continuity**: `--resume <sessionId>` flag resumes conversations
 - **Vision**: Uses `--input-format stream-json` with base64 image data via stdin
-- **Voice-to-text**: Optional whisper.cpp — OGG Opus → ffmpeg → WAV → whisper-cli (boosted: beam-size 8, best-of 8, flash-attn, auto language detection)
+- **Voice-to-text**: Groq API primary (OGG direct, <1 sec) → local whisper-cli fallback (ffmpeg → WAV → boosted whisper-cli)
 - **Retry**: Exponential backoff on transient errors (429, 503, connection resets)
 - **Timeout**: Optional process timeout (default: disabled), kills on exceed
 - **Concurrent I/O**: Reads stdout/stderr in parallel to prevent deadlock

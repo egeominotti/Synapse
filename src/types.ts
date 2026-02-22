@@ -72,6 +72,8 @@ export interface AgentConfig {
   whisperLanguage?: string
   /** CPU threads for whisper transcription (default: 4) */
   whisperThreads?: number
+  /** Groq API key — enables cloud STT as primary with local fallback */
+  groqApiKey?: string
 }
 
 /** Result of a single agent call */

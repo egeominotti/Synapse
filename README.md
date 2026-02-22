@@ -6,7 +6,7 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 
 - **REPL** — Terminal interface with slash commands, multiline input, vision support
 - **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, LRU agent eviction
-- **Voice Transcription** — Local speech-to-text via whisper.cpp large-v3 (boosted, auto language, flash-attn)
+- **Voice Transcription** — Groq API (<1 sec) + local whisper-cli fallback, whisper-large-v3-turbo
 - **HTML Formatted Output** — Claude's Markdown converted to Telegram HTML with smart chunking
 - **MCP Servers** — Memory, Sequential Thinking, Fetch, Filesystem, Git, SQLite, Everything
 - **Runtime Config** — Change all agent parameters live from Telegram (`/config`), admin-only
@@ -50,23 +50,24 @@ cp .env.example .env  # edit with your tokens
 
 ### Environment Variables
 
-| Variable                        | Required | Default                  | Description                                           |
-| ------------------------------- | -------- | ------------------------ | ----------------------------------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN`       | Yes      | —                        | Claude CLI auth token                                 |
-| `TELEGRAM_BOT_TOKEN`            | Bot only | —                        | Telegram bot token from @BotFather                    |
-| `TELEGRAM_ADMIN_ID`             | No       | —                        | Telegram chat ID for admin access (`/config`)         |
-| `CLAUDE_AGENT_SYSTEM_PROMPT`    | No       | `""`                     | Custom agent persona/instructions                     |
-| `CLAUDE_AGENT_TIMEOUT_MS`       | No       | `0` (disabled)           | Max response time (ms), 0 = no timeout                |
-| `CLAUDE_AGENT_MAX_RETRIES`      | No       | `3`                      | Retry attempts on transient errors                    |
-| `CLAUDE_AGENT_RETRY_DELAY_MS`   | No       | `1000`                   | Initial retry backoff (ms)                            |
-| `CLAUDE_AGENT_DB_PATH`          | No       | `~/.claude-agent/neo.db` | SQLite database path                                  |
-| `CLAUDE_AGENT_LOG_LEVEL`        | No       | `INFO`                   | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`                |
-| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No       | `1`                      | Skip CLI permission prompts                           |
-| `CLAUDE_AGENT_DOCKER`           | No       | `0`                      | Run in Docker containers                              |
-| `CLAUDE_AGENT_DOCKER_IMAGE`     | No       | `claude-agent:latest`    | Docker image name                                     |
-| `WHISPER_MODEL_PATH`            | No       | —                        | Path to ggml model file (enables voice transcription) |
-| `WHISPER_LANGUAGE`              | No       | `auto`                   | Whisper language (`auto` for detection, or ISO 639-1) |
-| `WHISPER_THREADS`               | No       | `4`                      | CPU threads for whisper (1–16)                        |
+| Variable                        | Required | Default                  | Description                                                 |
+| ------------------------------- | -------- | ------------------------ | ----------------------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`       | Yes      | —                        | Claude CLI auth token                                       |
+| `TELEGRAM_BOT_TOKEN`            | Bot only | —                        | Telegram bot token from @BotFather                          |
+| `TELEGRAM_ADMIN_ID`             | No       | —                        | Telegram chat ID for admin access (`/config`)               |
+| `CLAUDE_AGENT_SYSTEM_PROMPT`    | No       | `""`                     | Custom agent persona/instructions                           |
+| `CLAUDE_AGENT_TIMEOUT_MS`       | No       | `0` (disabled)           | Max response time (ms), 0 = no timeout                      |
+| `CLAUDE_AGENT_MAX_RETRIES`      | No       | `3`                      | Retry attempts on transient errors                          |
+| `CLAUDE_AGENT_RETRY_DELAY_MS`   | No       | `1000`                   | Initial retry backoff (ms)                                  |
+| `CLAUDE_AGENT_DB_PATH`          | No       | `~/.claude-agent/neo.db` | SQLite database path                                        |
+| `CLAUDE_AGENT_LOG_LEVEL`        | No       | `INFO`                   | `DEBUG` \| `INFO` \| `WARN` \| `ERROR`                      |
+| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No       | `1`                      | Skip CLI permission prompts                                 |
+| `CLAUDE_AGENT_DOCKER`           | No       | `0`                      | Run in Docker containers                                    |
+| `CLAUDE_AGENT_DOCKER_IMAGE`     | No       | `claude-agent:latest`    | Docker image name                                           |
+| `GROQ_API_KEY`                  | No       | —                        | Groq API key for cloud STT (primary, with local fallback)   |
+| `WHISPER_MODEL_PATH`            | No       | —                        | Path to ggml model file (enables local voice transcription) |
+| `WHISPER_LANGUAGE`              | No       | `auto`                   | Whisper language (`auto` for detection, or ISO 639-1)       |
+| `WHISPER_THREADS`               | No       | `4`                      | CPU threads for whisper (1–16)                              |
 
 ## Usage
 
@@ -113,23 +114,26 @@ Edit a sent message to re-send it to Claude.
 
 #### Voice Transcription
 
-When `WHISPER_MODEL_PATH` is set and `whisper-cli` + `ffmpeg` are installed:
+Send a voice message or audio file on Telegram. The bot transcribes it and sends it to Claude.
 
-1. Send a voice message or audio file on Telegram
-2. The bot shows the transcription: `"text"`
-3. The transcription is sent to Claude as a prompt
-4. Claude's response is sent back
+**Cloud (Groq, recommended):** Set `GROQ_API_KEY` — no local binaries needed, <1 sec response, free 8h/day.
+
+**Local fallback:** Install `brew install whisper-cpp ffmpeg` and set `WHISPER_MODEL_PATH`.
+
+Both can be configured together: Groq as primary, local as fallback on errors/rate limits.
 
 Setup:
 
 ```bash
-brew install whisper-cpp ffmpeg
-curl -L -o ~/.claude-agent/ggml-large.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
-# Set WHISPER_MODEL_PATH=~/.claude-agent/ggml-large.bin in .env
-```
+# Cloud only (fastest)
+# Set GROQ_API_KEY in .env (get key at https://console.groq.com/keys)
 
-Boosted parameters: beam-size 8, best-of 8, flash-attn, auto language detection.
+# Local + cloud fallback
+brew install whisper-cpp ffmpeg
+curl -L -o ~/.claude-agent/ggml-large-v3-turbo.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin
+# Set WHISPER_MODEL_PATH and GROQ_API_KEY in .env
+```
 
 #### Runtime Configuration (Admin Only)
 

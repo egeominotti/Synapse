@@ -184,17 +184,23 @@ const scheduler = new Scheduler(db, async () => {})
 // ---------------------------------------------------------------------------
 
 let whisperConfig: WhisperConfig | null = null
-if (agentConfig.whisperModelPath) {
-  const { ok, missing } = await validateWhisperDeps()
-  if (ok) {
+const hasGroq = !!agentConfig.groqApiKey
+const hasLocalModel = !!agentConfig.whisperModelPath
+
+if (hasGroq || hasLocalModel) {
+  const localDeps = hasLocalModel ? await validateWhisperDeps() : { ok: false, missing: [] as string[] }
+
+  if (hasGroq || localDeps.ok) {
     whisperConfig = {
-      modelPath: agentConfig.whisperModelPath,
-      language: agentConfig.whisperLanguage ?? "it",
+      modelPath: agentConfig.whisperModelPath ?? "",
+      language: agentConfig.whisperLanguage ?? "auto",
       threads: agentConfig.whisperThreads ?? 4,
+      groqApiKey: agentConfig.groqApiKey,
     }
-    logger.info("Whisper enabled", { model: whisperConfig.modelPath, language: whisperConfig.language })
+    const mode = hasGroq ? (localDeps.ok ? "groq + local fallback" : "groq only") : "local only"
+    logger.info("Whisper enabled", { mode, model: whisperConfig.modelPath || "n/a", language: whisperConfig.language })
   } else {
-    logger.warn("Whisper disabled: missing binaries", { missing })
+    logger.warn("Whisper disabled: missing binaries and no Groq API key", { missing: localDeps.missing })
   }
 }
 

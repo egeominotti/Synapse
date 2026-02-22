@@ -55,5 +55,6 @@ export function loadConfig(): AgentConfig {
     whisperModelPath: Bun.env.WHISPER_MODEL_PATH || undefined,
     whisperLanguage: Bun.env.WHISPER_LANGUAGE || "auto",
     whisperThreads: getOptionalEnvInt("WHISPER_THREADS", 4, 1, 16),
+    groqApiKey: Bun.env.GROQ_API_KEY || undefined,
   }
 }

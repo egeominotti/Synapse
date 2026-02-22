@@ -1,23 +1,25 @@
 /**
- * Optional local speech-to-text via whisper.cpp (whisper-cli).
+ * Speech-to-text via Groq API (primary) + whisper-cli local (fallback).
  *
- * Requires external binaries (not bundled):
- *   brew install whisper-cpp ffmpeg
+ * Priority: Groq cloud → local whisper-cli + ffmpeg
  *
- * Enable by setting WHISPER_MODEL_PATH to a ggml model file.
- * If not configured, voice messages are gracefully ignored.
+ * Groq: sends OGG directly (no ffmpeg needed), <1 sec response, free 8h/day.
+ * Local: OGG Opus → ffmpeg → WAV 16kHz mono → whisper-cli → text.
  *
- * Flow: OGG Opus (Telegram) → ffmpeg → WAV 16kHz mono → whisper-cli → text
+ * Enable cloud: set GROQ_API_KEY
+ * Enable local: set WHISPER_MODEL_PATH + install whisper-cpp ffmpeg
  */
 
 import { logger } from "./logger"
 
-const WHISPER_TIMEOUT_MS = 120_000 // 2 minutes max for transcription
+const WHISPER_TIMEOUT_MS = 120_000 // 2 minutes max for local transcription
+const GROQ_TIMEOUT_MS = 30_000 // 30 seconds for cloud API
 
 export interface WhisperConfig {
   modelPath: string
   language: string
   threads: number
+  groqApiKey?: string
 }
 
 /** Check if a binary is available in PATH. */
@@ -39,6 +41,54 @@ export async function validateWhisperDeps(): Promise<{ ok: boolean; missing: str
   return { ok: missing.length === 0, missing }
 }
 
+// ---------------------------------------------------------------------------
+// Groq cloud transcription
+// ---------------------------------------------------------------------------
+
+/** Transcribe audio via Groq API (whisper-large-v3-turbo). */
+async function transcribeGroq(audioPath: string, apiKey: string, language: string): Promise<string> {
+  const audioBuffer = await Bun.file(audioPath).arrayBuffer()
+  const fileName = audioPath.split("/").pop() ?? "audio.ogg"
+
+  const formData = new FormData()
+  formData.append("file", new Blob([audioBuffer], { type: "audio/ogg" }), fileName)
+  formData.append("model", "whisper-large-v3-turbo")
+  formData.append("response_format", "json")
+  formData.append("temperature", "0")
+  if (language !== "auto") {
+    formData.append("language", language)
+  }
+
+  logger.debug("Groq transcription started", { audioPath, language })
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS)
+
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: formData,
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const body = await res.text()
+      throw new Error(`Groq API ${res.status}: ${body}`)
+    }
+
+    const json = (await res.json()) as { text: string }
+    logger.info("Groq transcription complete", { length: json.text.length })
+    return json.text
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Local whisper-cli transcription
+// ---------------------------------------------------------------------------
+
 /** Convert audio to WAV 16kHz mono via ffmpeg (required for OGG Opus). */
 async function convertToWav(inputPath: string): Promise<string> {
   const wavPath = inputPath.replace(/\.[^.]+$/, ".wav")
@@ -58,12 +108,8 @@ async function convertToWav(inputPath: string): Promise<string> {
   return wavPath
 }
 
-/**
- * Transcribe an audio file using whisper-cli (boosted).
- * Converts to WAV first (Telegram sends OGG Opus which whisper-cli can't read directly).
- */
-export async function transcribe(audioPath: string, config: WhisperConfig): Promise<string> {
-  // Convert to WAV 16kHz mono — whisper-cli requires WAV format
+/** Transcribe audio locally via whisper-cli (boosted). */
+async function transcribeLocal(audioPath: string, config: WhisperConfig): Promise<string> {
   const wavPath = await convertToWav(audioPath)
 
   const args = [
@@ -74,17 +120,15 @@ export async function transcribe(audioPath: string, config: WhisperConfig): Prom
     config.language,
     "-t",
     String(config.threads),
-    // -- Boost: accuracy --
     "--beam-size",
-    "8", // default 5 → wider search
+    "8",
     "--best-of",
-    "8", // default 5 → more candidates
+    "8",
     "--entropy-thold",
-    "2.8", // default 2.4 → more tolerant on uncertain segments
+    "2.8",
     "--no-speech-thold",
-    "0.3", // default 0.6 → less aggressive silence trimming
-    "--flash-attn", // GPU-accelerated attention (Metal on macOS)
-    // -- Boost: output --
+    "0.3",
+    "--flash-attn",
     "--no-prints",
     "--prompt",
     "Trascrivi accuratamente.",
@@ -92,7 +136,7 @@ export async function transcribe(audioPath: string, config: WhisperConfig): Prom
     wavPath,
   ]
 
-  logger.debug("Whisper transcription started", { audioPath, wavPath, language: config.language })
+  logger.debug("Local whisper transcription started", { audioPath, wavPath, language: config.language })
 
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" })
 
@@ -116,14 +160,32 @@ export async function transcribe(audioPath: string, config: WhisperConfig): Prom
     throw new Error(`whisper-cli: ${msg}`)
   }
 
-  // whisper-cli stdout contains timestamped lines like:
-  //   [00:00:00.000 --> 00:00:03.000]   Hello world
-  // Extract just the text, stripping timestamps
   const text = parseWhisperOutput(stdout)
   if (!text) throw new Error("whisper-cli: nessun testo trascritto")
 
-  logger.info("Whisper transcription complete", { length: text.length, language: config.language })
+  logger.info("Local whisper transcription complete", { length: text.length, language: config.language })
   return text
+}
+
+// ---------------------------------------------------------------------------
+// Public API: Groq primary → local fallback
+// ---------------------------------------------------------------------------
+
+/**
+ * Transcribe audio. Uses Groq API if configured, falls back to local whisper-cli.
+ */
+export async function transcribe(audioPath: string, config: WhisperConfig): Promise<string> {
+  if (config.groqApiKey) {
+    try {
+      return await transcribeGroq(audioPath, config.groqApiKey, config.language)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      logger.warn("Groq transcription failed, falling back to local", { error: msg })
+      return await transcribeLocal(audioPath, config)
+    }
+  }
+
+  return await transcribeLocal(audioPath, config)
 }
 
 /** Parse whisper-cli stdout, stripping timestamp markers. */
