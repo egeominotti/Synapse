@@ -92,21 +92,30 @@ export class AgentPool {
   release(agent: Agent, isOverflow: boolean): void {
     if (!isOverflow) {
       this.masterSlot.busy = false
-      return
-    }
+    } else {
+      // Check if it's a pre-created worker
+      let found = false
+      for (const slot of this.workerSlots) {
+        if (slot.agent === agent) {
+          slot.busy = false
+          agent.setSessionId(null)
+          found = true
+          break
+        }
+      }
 
-    // Check if it's a pre-created worker
-    for (const slot of this.workerSlots) {
-      if (slot.agent === agent) {
-        slot.busy = false
-        agent.setSessionId(null)
-        return
+      // Temporary overflow — clean up
+      if (!found) {
+        agent.cleanup()
+        logger.debug("Temporary overflow agent cleaned up", { chatId: this.chatId })
       }
     }
 
-    // Temporary overflow — clean up
-    agent.cleanup()
-    logger.debug("Temporary overflow agent cleaned up", { chatId: this.chatId })
+    // Log when all agents are idle
+    if (!this.masterSlot.busy && this.workerSlots.every((s) => !s.busy)) {
+      const names = [this.masterSlot, ...this.workerSlots].map((s) => `${s.identity.emoji} ${s.identity.name}`)
+      logger.info("All agents idle", { chatId: this.chatId, team: names })
+    }
   }
 
   /** Refresh a worker's system prompt with full conversation context from DB. */
