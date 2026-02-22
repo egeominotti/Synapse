@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import type { NeoConfig } from "@neo/core";
+import { resolve } from "node:path";
+import type { NeoConfig, Logger } from "@neo/core";
 
 const SENTINEL_START = "---NEO-RESULT-START---";
 const SENTINEL_END = "---NEO-RESULT-END---";
@@ -13,7 +14,7 @@ export interface ContainerPayload {
   model: string;
   sessionId?: string;
   secrets: Record<string, string>;
-  agents?: unknown[];
+  agents?: Record<string, unknown>;
 }
 
 export interface ContainerResult {
@@ -25,18 +26,26 @@ export interface ContainerResult {
 }
 
 export class ContainerRunner {
-  constructor(private config: NeoConfig) {}
+  constructor(
+    private config: NeoConfig,
+    private logger: Logger,
+  ) {}
 
   async run(payload: ContainerPayload): Promise<ContainerResult> {
     const containerName = `neo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const ipcPath = resolve(process.cwd(), "data/ipc");
 
     const args = [
       "run", "--rm", "-i",
       "--name", containerName,
       "--memory", this.config.docker.memoryLimit,
       "--cpus", this.config.docker.cpuLimit,
+      // Mount workspace and IPC directories
+      "-v", `${ipcPath}:/ipc:rw`,
       this.config.docker.imageName,
     ];
+
+    this.logger.info({ container: containerName, model: payload.model }, "Spawning container");
 
     return new Promise<ContainerResult>((resolve, reject) => {
       const proc = spawn("docker", args, {
@@ -56,28 +65,36 @@ export class ContainerRunner {
 
       proc.stderr.on("data", (chunk: Buffer) => {
         stderr += chunk.toString();
+        // Log agent-runner stderr output (audit, errors)
+        const lines = chunk.toString().split("\n").filter(Boolean);
+        for (const line of lines) {
+          this.logger.debug({ container: containerName, stderr: line }, "Container stderr");
+        }
       });
 
       proc.on("close", (code) => {
+        this.logger.info({ container: containerName, code }, "Container exited");
+
+        // Even on non-zero exit, try to parse result (agent-runner writes result on error too)
+        const startIdx = stdout.indexOf(SENTINEL_START);
+        const endIdx = stdout.indexOf(SENTINEL_END);
+
+        if (startIdx !== -1 && endIdx !== -1) {
+          const resultJson = stdout.slice(startIdx + SENTINEL_START.length, endIdx);
+          try {
+            resolve(JSON.parse(resultJson));
+            return;
+          } catch {
+            // Fall through to error handling
+          }
+        }
+
         if (code !== 0) {
           reject(new Error(`Container exited with code ${code}: ${stderr.slice(0, 2000)}`));
           return;
         }
 
-        const startIdx = stdout.indexOf(SENTINEL_START);
-        const endIdx = stdout.indexOf(SENTINEL_END);
-
-        if (startIdx === -1 || endIdx === -1) {
-          reject(new Error(`Container output missing sentinel markers. stdout: ${stdout.slice(0, 2000)}`));
-          return;
-        }
-
-        const resultJson = stdout.slice(startIdx + SENTINEL_START.length, endIdx);
-        try {
-          resolve(JSON.parse(resultJson));
-        } catch {
-          reject(new Error(`Failed to parse container result: ${resultJson.slice(0, 500)}`));
-        }
+        reject(new Error(`Container output missing sentinel markers. stdout: ${stdout.slice(0, 2000)}`));
       });
 
       proc.on("error", (err) => {

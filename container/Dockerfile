@@ -13,19 +13,20 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV CHROME_PATH=/usr/bin/chromium
 
-# Install Claude Code CLI globally
+# Install Claude Code CLI globally (provides built-in tools: Bash, Read, Write, Edit, Glob, Grep, etc.)
 RUN npm install -g @anthropic-ai/claude-code
 
 # Create app directory
 WORKDIR /app
 
-# Copy agent-runner
+# Copy and install agent-runner dependencies (includes @anthropic-ai/claude-agent-sdk)
 COPY agent-runner/package.json agent-runner/package-lock.json* ./
-RUN npm install --production
+RUN npm install --omit=dev
 
+# Copy built agent-runner code
 COPY agent-runner/dist/ ./dist/
 
-# Create workspace directory
+# Create workspace and ipc directories
 RUN mkdir -p /workspace /ipc
 
 ENTRYPOINT ["node", "dist/index.js"]

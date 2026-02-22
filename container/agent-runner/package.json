@@ -9,7 +9,9 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.50"
+  },
   "devDependencies": {
     "typescript": "^5.8.0"
   }

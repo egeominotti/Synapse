@@ -1,5 +1,8 @@
 import "dotenv/config";
 import { loadConfig, createDb, createQueries, NeoEventBus, createLogger } from "@neo/core";
+import { Orchestrator, ContainerRunner, AgentRouter, ChatQueue, SessionManager } from "@neo/agent";
+import { McpRegistry } from "@neo/mcp";
+import { createBot } from "@neo/telegram";
 
 const logger = createLogger("neo");
 
@@ -42,7 +45,10 @@ async function main() {
   // 3. Init event bus
   const events = new NeoEventBus();
 
-  // Log all events in dev
+  events.on("agent:started", (payload) => {
+    logger.info({ agent: payload.agentType, chatId: payload.chatId }, "Agent started");
+  });
+
   events.on("agent:completed", (payload) => {
     logger.info({
       agent: payload.agentType,
@@ -56,11 +62,40 @@ async function main() {
     logger.error({ agent: payload.agentType, error: payload.error }, "Agent error");
   });
 
-  logger.info("Neo running");
+  // 4. Init MCP registry
+  const mcpRegistry = new McpRegistry(config);
+  mcpRegistry.initialize();
+  logger.info({ servers: mcpRegistry.getServerNames() }, "MCP registry initialized");
 
-  // TODO: Fase 2 - Init agent orchestrator + container runner
-  // TODO: Fase 3 - Init telegram bot
-  // TODO: Fase 4 - Init MCP registry
+  // 5. Init agent system
+  const containerRunner = new ContainerRunner(config, createLogger("container"));
+  const router = new AgentRouter();
+  const chatQueue = new ChatQueue(config.security.maxConcurrentAgents);
+  const sessions = new SessionManager(queries);
+
+  const orchestrator = new Orchestrator(
+    config,
+    events,
+    router,
+    sessions,
+    containerRunner,
+    chatQueue,
+  );
+
+  logger.info("Agent orchestrator initialized");
+
+  // 6. Init Telegram bot
+  if (config.telegram.botToken) {
+    const bot = createBot(config, events, orchestrator);
+    bot.start({
+      onStart: () => logger.info("Telegram bot started (polling)"),
+    });
+    logger.info("Telegram bot initialized");
+  } else {
+    logger.warn("No TELEGRAM_BOT_TOKEN - bot disabled");
+  }
+
+  logger.info("Neo running");
 }
 
 // Graceful shutdown
@@ -69,7 +104,6 @@ function setupShutdown() {
   for (const signal of signals) {
     process.on(signal, () => {
       logger.info({ signal }, "Shutting down...");
-      // TODO: cleanup containers, close DB, stop bot
       process.exit(0);
     });
   }
