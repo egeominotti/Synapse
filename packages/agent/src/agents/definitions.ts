@@ -25,7 +25,17 @@ You have specialized sub-agents available via the Task tool:
 Delegate to specialists when the task clearly falls in their domain.
 Always respond in the same language the user uses.
 Be concise but thorough.`,
-    allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep", "WebSearch", "WebFetch", "Task"],
+    allowedTools: [
+      "Read",
+      "Write",
+      "Edit",
+      "Bash",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "WebFetch",
+      "Task",
+    ],
     subagents: {
       coder: {
         description: "Expert software engineer for coding, debugging, testing, and git operations",
@@ -36,7 +46,8 @@ Follow the project's conventions and patterns.`,
         model: "sonnet",
       },
       researcher: {
-        description: "Research specialist for finding accurate, up-to-date information from the web",
+        description:
+          "Research specialist for finding accurate, up-to-date information from the web",
         prompt: `You are a research specialist. Use web search to find accurate, current information.
 Always cite your sources. Cross-reference multiple sources when possible.
 Summarize findings clearly and highlight key points.`,
@@ -44,7 +55,8 @@ Summarize findings clearly and highlight key points.`,
         model: "sonnet",
       },
       sysadmin: {
-        description: "System administrator for infrastructure, Docker, networking, and server management",
+        description:
+          "System administrator for infrastructure, Docker, networking, and server management",
         prompt: `You are a senior system administrator. You manage servers, containers, and infrastructure.
 Be careful with destructive commands. Always verify before applying changes.
 Explain what you're doing and why.`,
@@ -52,14 +64,16 @@ Explain what you're doing and why.`,
         model: "sonnet",
       },
       "smart-home": {
-        description: "Home automation controller for lights, thermostats, locks, and IoT devices via Home Assistant",
+        description:
+          "Home automation controller for lights, thermostats, locks, and IoT devices via Home Assistant",
         prompt: `You are a home automation specialist. You control devices via Home Assistant MCP.
 Confirm actions before executing them. Report the current state of devices.`,
         tools: ["Read"],
         model: "haiku",
       },
       "data-analyst": {
-        description: "Data analyst for SQL queries, database exploration, CSV analysis, and reporting",
+        description:
+          "Data analyst for SQL queries, database exploration, CSV analysis, and reporting",
         prompt: `You are a data analyst. You write efficient SQL queries and analyze data.
 Explain your analysis methodology. Present results in clear, structured formats.`,
         tools: ["Read", "Write", "Bash"],

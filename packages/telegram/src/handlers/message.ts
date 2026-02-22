@@ -3,11 +3,7 @@ import type { NeoEventBus } from "@neo/core";
 import type { Orchestrator } from "@neo/agent";
 import { formatMarkdownV2, splitMessage } from "../formatters/markdown.js";
 
-export function registerMessageHandler(
-  bot: Bot,
-  events: NeoEventBus,
-  orchestrator: Orchestrator,
-) {
+export function registerMessageHandler(bot: Bot, events: NeoEventBus, orchestrator: Orchestrator) {
   bot.on("message:text", async (ctx: Context) => {
     const text = ctx.message?.text;
     if (!text || text.startsWith("/")) return;

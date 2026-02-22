@@ -6,7 +6,15 @@ export interface RoutingDecision {
   systemPrompt: string;
   allowedTools: string[];
   model?: string;
-  agents?: Record<string, { description: string; prompt: string; tools?: string[]; model?: "sonnet" | "opus" | "haiku" | "inherit" }>;
+  agents?: Record<
+    string,
+    {
+      description: string;
+      prompt: string;
+      tools?: string[];
+      model?: "sonnet" | "opus" | "haiku" | "inherit";
+    }
+  >;
 }
 
 interface PatternMatch {
@@ -17,11 +25,32 @@ interface PatternMatch {
 
 export class AgentRouter {
   private patterns: PatternMatch[] = [
-    { regex: /\b(code|bug|fix|refactor|implement|test|deploy|git|commit|pr|typescript|python|rust|java)\b/i, agentKey: "coder", priority: 10 },
-    { regex: /\b(server|docker|container|nginx|ssh|process|port|systemctl|devops|deploy)\b/i, agentKey: "sysadmin", priority: 9 },
-    { regex: /\b(light|thermostat|temperature|lock|camera|sensor|accendi|spegni|riscaldamento)\b/i, agentKey: "smart-home", priority: 9 },
-    { regex: /\b(search|find|research|look up|what is|latest|news|cerca|ultime)\b/i, agentKey: "researcher", priority: 8 },
-    { regex: /\b(query|database|sql|table|analyze|data|csv|report|analizza)\b/i, agentKey: "data-analyst", priority: 8 },
+    {
+      regex:
+        /\b(code|bug|fix|refactor|implement|test|deploy|git|commit|pr|typescript|python|rust|java)\b/i,
+      agentKey: "coder",
+      priority: 10,
+    },
+    {
+      regex: /\b(server|docker|container|nginx|ssh|process|port|systemctl|devops|deploy)\b/i,
+      agentKey: "sysadmin",
+      priority: 9,
+    },
+    {
+      regex: /\b(light|thermostat|temperature|lock|camera|sensor|accendi|spegni|riscaldamento)\b/i,
+      agentKey: "smart-home",
+      priority: 9,
+    },
+    {
+      regex: /\b(search|find|research|look up|what is|latest|news|cerca|ultime)\b/i,
+      agentKey: "researcher",
+      priority: 8,
+    },
+    {
+      regex: /\b(query|database|sql|table|analyze|data|csv|report|analizza)\b/i,
+      agentKey: "data-analyst",
+      priority: 8,
+    },
   ];
 
   async route(request: QueryRequest): Promise<RoutingDecision> {

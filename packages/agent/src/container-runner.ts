@@ -36,12 +36,18 @@ export class ContainerRunner {
     const ipcPath = resolve(process.cwd(), "data/ipc");
 
     const args = [
-      "run", "--rm", "-i",
-      "--name", containerName,
-      "--memory", this.config.docker.memoryLimit,
-      "--cpus", this.config.docker.cpuLimit,
+      "run",
+      "--rm",
+      "-i",
+      "--name",
+      containerName,
+      "--memory",
+      this.config.docker.memoryLimit,
+      "--cpus",
+      this.config.docker.cpuLimit,
       // Mount workspace and IPC directories
-      "-v", `${ipcPath}:/ipc:rw`,
+      "-v",
+      `${ipcPath}:/ipc:rw`,
       this.config.docker.imageName,
     ];
 
@@ -94,7 +100,9 @@ export class ContainerRunner {
           return;
         }
 
-        reject(new Error(`Container output missing sentinel markers. stdout: ${stdout.slice(0, 2000)}`));
+        reject(
+          new Error(`Container output missing sentinel markers. stdout: ${stdout.slice(0, 2000)}`),
+        );
       });
 
       proc.on("error", (err) => {

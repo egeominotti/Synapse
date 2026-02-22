@@ -35,15 +35,13 @@ export class Orchestrator {
   ) {}
 
   async handleMessage(request: QueryRequest): Promise<QueryResponse> {
-    return this.chatQueue.enqueue(request.chatId, () =>
-      this.executeQuery(request)
-    );
+    return this.chatQueue.enqueue(request.chatId, () => this.executeQuery(request));
   }
 
   private async executeQuery(request: QueryRequest): Promise<QueryResponse> {
     const routing = await this.router.route(request);
-    const sessionId = request.replyToSessionId
-      ?? await this.sessions.getActiveSession(request.chatId);
+    const sessionId =
+      request.replyToSessionId ?? (await this.sessions.getActiveSession(request.chatId));
 
     this.events.emit("agent:started", {
       sessionId: sessionId ?? "",

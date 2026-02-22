@@ -57,7 +57,11 @@ export class McpRegistry {
     if (enabled.postgres) {
       this.configs.set("postgres", {
         command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-postgres", (configs.postgres?.connectionString as string) ?? ""],
+        args: [
+          "-y",
+          "@modelcontextprotocol/server-postgres",
+          (configs.postgres?.connectionString as string) ?? "",
+        ],
       });
     }
 

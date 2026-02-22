@@ -1,7 +1,7 @@
 export type HookCallback = (
   input: any,
   toolUseID: string | undefined,
-  options: { signal: AbortSignal }
+  options: { signal: AbortSignal },
 ) => Promise<Record<string, unknown>>;
 
 /**
@@ -19,7 +19,9 @@ export function createSanitizeBashHook(secrets: string[]): HookCallback {
     const output = JSON.stringify(input.tool_output ?? "");
     for (const secret of secrets) {
       if (secret && output.includes(secret)) {
-        console.error("[SECURITY] Secret detected in Bash output - container is isolated so no leak to host");
+        console.error(
+          "[SECURITY] Secret detected in Bash output - container is isolated so no leak to host",
+        );
       }
     }
     return {};
@@ -34,11 +36,13 @@ export function createAuditHook(): HookCallback {
     if (input.hook_event_name !== "PostToolUse") return {};
 
     // Log to stderr (not stdout, which is reserved for result sentinel)
-    console.error(JSON.stringify({
-      event: "tool_use",
-      tool: input.tool_name,
-      timestamp: new Date().toISOString(),
-    }));
+    console.error(
+      JSON.stringify({
+        event: "tool_use",
+        tool: input.tool_name,
+        timestamp: new Date().toISOString(),
+      }),
+    );
 
     return {};
   };

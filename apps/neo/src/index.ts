@@ -50,12 +50,15 @@ async function main() {
   });
 
   events.on("agent:completed", (payload) => {
-    logger.info({
-      agent: payload.agentType,
-      cost: payload.costUsd,
-      duration: payload.durationMs,
-      turns: payload.numTurns,
-    }, "Agent completed");
+    logger.info(
+      {
+        agent: payload.agentType,
+        cost: payload.costUsd,
+        duration: payload.durationMs,
+        turns: payload.numTurns,
+      },
+      "Agent completed",
+    );
   });
 
   events.on("agent:error", (payload) => {

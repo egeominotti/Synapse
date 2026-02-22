@@ -9,23 +9,21 @@ export interface NeoSessionData {
   activeSessionId?: string;
 }
 
-export function createBot(
-  config: NeoConfig,
-  events: NeoEventBus,
-  orchestrator: Orchestrator,
-) {
+export function createBot(config: NeoConfig, events: NeoEventBus, orchestrator: Orchestrator) {
   const bot = new Bot(config.telegram.botToken);
 
   // Session middleware
-  bot.use(session<NeoSessionData, any>({
-    initial: () => ({}),
-  }));
+  bot.use(
+    session<NeoSessionData, any>({
+      initial: () => ({}),
+    }),
+  );
 
   // Auth middleware - whitelist users/groups
   bot.use(authMiddleware(config.telegram.allowedUsers, config.telegram.allowedGroups));
 
   // Command handlers
-  registerCommandHandlers(bot, config, events);
+  registerCommandHandlers(bot, config);
 
   // Message handler - main logic
   registerMessageHandler(bot, events, orchestrator);

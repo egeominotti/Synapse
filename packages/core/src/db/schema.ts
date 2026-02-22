@@ -12,7 +12,9 @@ export const conversations = sqliteTable("conversations", {
 
 export const messages = sqliteTable("messages", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  conversationId: integer("conversation_id").notNull().references(() => conversations.id),
+  conversationId: integer("conversation_id")
+    .notNull()
+    .references(() => conversations.id),
   role: text("role").notNull(), // "user" | "assistant" | "system"
   content: text("content").notNull(),
   userId: integer("user_id"),

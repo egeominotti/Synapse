@@ -1,5 +1,4 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
-import type { HookCallback } from "./hooks.js";
 import { createSanitizeBashHook, createAuditHook } from "./hooks.js";
 
 const SENTINEL_START = "---NEO-RESULT-START---";
@@ -14,7 +13,15 @@ interface AgentPayload {
   model: string;
   sessionId?: string;
   secrets: Record<string, string>;
-  agents?: Record<string, { description: string; prompt: string; tools?: string[]; model?: "sonnet" | "opus" | "haiku" | "inherit" }>;
+  agents?: Record<
+    string,
+    {
+      description: string;
+      prompt: string;
+      tools?: string[];
+      model?: "sonnet" | "opus" | "haiku" | "inherit";
+    }
+  >;
 }
 
 interface AgentResult {
@@ -60,9 +67,7 @@ async function main() {
     env: payload.secrets,
     cwd: "/workspace",
     hooks: {
-      PostToolUse: [
-        { hooks: [sanitizeHook, auditHook] },
-      ],
+      PostToolUse: [{ hooks: [sanitizeHook, auditHook] }],
     },
     ...(payload.sessionId ? { resume: payload.sessionId } : {}),
     ...(payload.agents ? { agents: payload.agents } : {}),

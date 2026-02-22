@@ -6,19 +6,25 @@ export function createQueries(db: NeoDb) {
   return {
     // Conversations
     getOrCreateConversation(chatId: number, chatType: string, chatTitle?: string) {
-      const existing = db.select().from(schema.conversations)
+      const existing = db
+        .select()
+        .from(schema.conversations)
         .where(eq(schema.conversations.chatId, chatId))
         .get();
       if (existing) return existing;
 
       const now = new Date().toISOString();
-      return db.insert(schema.conversations).values({
-        chatId,
-        chatType,
-        chatTitle: chatTitle ?? null,
-        lastActivityAt: now,
-        createdAt: now,
-      }).returning().get();
+      return db
+        .insert(schema.conversations)
+        .values({
+          chatId,
+          chatType,
+          chatTitle: chatTitle ?? null,
+          lastActivityAt: now,
+          createdAt: now,
+        })
+        .returning()
+        .get();
     },
 
     updateConversationActivity(chatId: number, sessionId: string) {
@@ -41,21 +47,27 @@ export function createQueries(db: NeoDb) {
       numTurns?: number;
       telegramMessageId?: number;
     }) {
-      return db.insert(schema.messages).values({
-        ...data,
-        userId: data.userId ?? null,
-        agentType: data.agentType ?? null,
-        sessionId: data.sessionId ?? null,
-        costUsd: data.costUsd ?? null,
-        durationMs: data.durationMs ?? null,
-        numTurns: data.numTurns ?? null,
-        telegramMessageId: data.telegramMessageId ?? null,
-        createdAt: new Date().toISOString(),
-      }).returning().get();
+      return db
+        .insert(schema.messages)
+        .values({
+          ...data,
+          userId: data.userId ?? null,
+          agentType: data.agentType ?? null,
+          sessionId: data.sessionId ?? null,
+          costUsd: data.costUsd ?? null,
+          durationMs: data.durationMs ?? null,
+          numTurns: data.numTurns ?? null,
+          telegramMessageId: data.telegramMessageId ?? null,
+          createdAt: new Date().toISOString(),
+        })
+        .returning()
+        .get();
     },
 
     getRecentMessages(conversationId: number, limit = 20) {
-      return db.select().from(schema.messages)
+      return db
+        .select()
+        .from(schema.messages)
         .where(eq(schema.messages.conversationId, conversationId))
         .orderBy(desc(schema.messages.id))
         .limit(limit)
@@ -66,7 +78,9 @@ export function createQueries(db: NeoDb) {
     // Sessions
     saveSession(data: { id: string; chatId: number; agentType: string }) {
       const now = new Date().toISOString();
-      const existing = db.select().from(schema.sessions)
+      const existing = db
+        .select()
+        .from(schema.sessions)
         .where(eq(schema.sessions.id, data.id))
         .get();
 
@@ -78,16 +92,22 @@ export function createQueries(db: NeoDb) {
         return existing;
       }
 
-      return db.insert(schema.sessions).values({
-        ...data,
-        status: "active",
-        createdAt: now,
-        lastUsedAt: now,
-      }).returning().get();
+      return db
+        .insert(schema.sessions)
+        .values({
+          ...data,
+          status: "active",
+          createdAt: now,
+          lastUsedAt: now,
+        })
+        .returning()
+        .get();
     },
 
     getActiveSession(chatId: number) {
-      return db.select().from(schema.sessions)
+      return db
+        .select()
+        .from(schema.sessions)
         .where(eq(schema.sessions.chatId, chatId))
         .orderBy(desc(schema.sessions.lastUsedAt))
         .limit(1)
@@ -106,18 +126,22 @@ export function createQueries(db: NeoDb) {
       costUsd?: number;
       durationMs?: number;
     }) {
-      return db.insert(schema.auditLog).values({
-        sessionId: data.sessionId ?? null,
-        chatId: data.chatId ?? null,
-        userId: data.userId ?? null,
-        eventType: data.eventType,
-        toolName: data.toolName ?? null,
-        toolInput: data.toolInput ? JSON.stringify(data.toolInput).slice(0, 10240) : null,
-        toolOutput: data.toolOutput ? JSON.stringify(data.toolOutput).slice(0, 5120) : null,
-        costUsd: data.costUsd ?? null,
-        durationMs: data.durationMs ?? null,
-        createdAt: new Date().toISOString(),
-      }).returning().get();
+      return db
+        .insert(schema.auditLog)
+        .values({
+          sessionId: data.sessionId ?? null,
+          chatId: data.chatId ?? null,
+          userId: data.userId ?? null,
+          eventType: data.eventType,
+          toolName: data.toolName ?? null,
+          toolInput: data.toolInput ? JSON.stringify(data.toolInput).slice(0, 10240) : null,
+          toolOutput: data.toolOutput ? JSON.stringify(data.toolOutput).slice(0, 5120) : null,
+          costUsd: data.costUsd ?? null,
+          durationMs: data.durationMs ?? null,
+          createdAt: new Date().toISOString(),
+        })
+        .returning()
+        .get();
     },
   };
 }
