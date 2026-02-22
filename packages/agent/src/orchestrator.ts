@@ -1,8 +1,12 @@
-import type { NeoConfig, NeoEventBus, NeoQueries } from "@neo/core";
-import type { ContainerRunner, ContainerPayload, ContainerResult } from "./container-runner.js";
-import type { AgentRouter, RoutingDecision } from "./router.js";
+import type { NeoConfig, NeoEventBus } from "@neo/core";
+import type { ContainerRunner, ContainerPayload } from "./container-runner.js";
+import type { AgentRouter } from "./router.js";
 import type { ChatQueue } from "./queue.js";
 import type { SessionManager } from "./session-manager.js";
+
+export interface McpConfigProvider {
+  getConfigsForAgent(agentType: string): Record<string, unknown>;
+}
 
 export interface QueryRequest {
   chatId: number;
@@ -27,6 +31,7 @@ export class Orchestrator {
     private sessions: SessionManager,
     private containerRunner: ContainerRunner,
     private chatQueue: ChatQueue,
+    private mcpProvider?: McpConfigProvider,
   ) {}
 
   async handleMessage(request: QueryRequest): Promise<QueryResponse> {
@@ -51,11 +56,12 @@ export class Orchestrator {
       prompt: request.text,
       systemPrompt: routing.systemPrompt,
       allowedTools: routing.allowedTools,
-      mcpServers: {},
+      mcpServers: this.mcpProvider?.getConfigsForAgent(routing.primaryAgent) ?? {},
       maxTurns: this.config.claude.maxTurns,
       model: routing.model ?? this.config.claude.defaultModel,
       sessionId: sessionId ?? undefined,
       secrets: this.buildSecrets(),
+      agents: routing.agents,
     };
 
     const result = await this.containerRunner.run(containerPayload);

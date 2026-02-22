@@ -80,6 +80,7 @@ async function main() {
     sessions,
     containerRunner,
     chatQueue,
+    mcpRegistry,
   );
 
   logger.info("Agent orchestrator initialized");
