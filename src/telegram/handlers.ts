@@ -75,7 +75,9 @@ export function snapshotSandbox(agent: Agent): FileSnapshot {
 
 export async function sendSandboxFiles(ctx: Context, agent: Agent, before: FileSnapshot): Promise<void> {
   const after = agent.listSandboxFiles()
+  // Only send files from the output/ directory (Claude puts requested files there)
   const newFiles = after.filter((f) => {
+    if (!f.path.startsWith("output/")) return false
     const prevMtime = before.get(f.path)
     return prevMtime === undefined || f.mtimeMs > prevMtime
   })
@@ -91,7 +93,9 @@ export async function sendSandboxFiles(ctx: Context, agent: Agent, before: FileS
         }
         continue
       }
-      await ctx.replyWithDocument(new InputFile(data, file.path), { caption: `📎 ${file.path}` })
+      // Strip "output/" prefix for cleaner filename
+      const displayName = file.path.replace(/^output\//, "")
+      await ctx.replyWithDocument(new InputFile(data, displayName), { caption: `📎 ${displayName}` })
       logger.debug("Sandbox file sent", { path: file.path, size: data.length })
     } catch (err) {
       logger.warn("Failed to send sandbox file", { path: file.path, error: String(err) })
