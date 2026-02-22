@@ -131,10 +131,12 @@ export class AgentPool {
     return this.masterSlot.agent
   }
 
-  /** Replace the master agent (used on session reset) */
+  /** Replace the master agent (used on session reset). Cleans up the old agent. */
   setPrimary(agent: Agent): void {
+    const old = this.masterSlot.agent
     this.masterSlot.agent = agent
     this.masterSlot.busy = false
+    old.cleanup()
   }
 
   /** Clean up all agents (master + workers) — used by /reset and LRU eviction */

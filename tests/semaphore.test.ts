@@ -90,10 +90,9 @@ describe("Semaphore", () => {
     expect(maxConcurrent).toBe(2)
   })
 
-  it("release without acquire does not go negative", () => {
+  it("release without acquire throws", () => {
     const sem = new Semaphore(2)
-    sem.release()
-    expect(sem.active).toBe(-1) // edge case: caller's responsibility
+    expect(() => sem.release()).toThrow("release() called without matching acquire()")
   })
 
   it("active and pending report correct values", async () => {

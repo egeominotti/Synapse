@@ -90,8 +90,10 @@ export class Agent {
 
   /** Update the system prompt (used to refresh memory context on worker agents). */
   setSystemPrompt(prompt: string | undefined): void {
-    this.config.systemPrompt = prompt
+    this.overrideSystemPrompt = prompt
   }
+
+  private overrideSystemPrompt: string | undefined | null = null
 
   /** Send a text prompt with retry + timeout. */
   async call(prompt: string): Promise<AgentCallResult> {
@@ -100,10 +102,10 @@ export class Agent {
 
   /** Send an image + optional text prompt via stream-json. */
   async callWithImage(imagePath: string, prompt: string): Promise<AgentCallResult> {
-    if (!existsSync(imagePath)) throw new Error(`File non trovato: ${imagePath}`)
+    if (!existsSync(imagePath)) throw new Error(`File not found: ${imagePath}`)
     const ext = extname(imagePath).toLowerCase()
     const mediaType = MIME_TYPES[ext]
-    if (!mediaType) throw new Error(`Formato non supportato: ${ext}. Usa: ${Object.keys(MIME_TYPES).join(", ")}`)
+    if (!mediaType) throw new Error(`Unsupported format: ${ext}. Use: ${Object.keys(MIME_TYPES).join(", ")}`)
 
     return this.callWithRetry(() => this.spawnWithImage(imagePath, mediaType, prompt))
   }
@@ -419,10 +421,12 @@ export class Agent {
     if (outputFormat === "stream-json") args.push("--verbose")
     if (this.config.mcpConfigPath) args.push("--mcp-config", this.config.mcpConfigPath)
     if (this.config.skipPermissions) args.push("--dangerously-skip-permissions")
+    // Use agent-local override if set, otherwise fall back to shared config
+    const effectivePrompt = this.overrideSystemPrompt !== null ? this.overrideSystemPrompt : this.config.systemPrompt
     if (this.sessionId) {
       args.push("--resume", this.sessionId)
-    } else if (this.config.systemPrompt) {
-      args.push("--system-prompt", this.config.systemPrompt)
+    } else if (effectivePrompt) {
+      args.push("--system-prompt", effectivePrompt)
     }
     if (inlinePrompt !== null) args.push(inlinePrompt)
     return args

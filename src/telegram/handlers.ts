@@ -5,7 +5,7 @@
  */
 
 import { readFileSync, writeFileSync } from "fs"
-import { join } from "path"
+import { join, basename } from "path"
 import { InputFile, type Bot, type Context } from "grammy"
 import { Agent } from "../agent"
 import type { AgentPool } from "../agent-pool"
@@ -293,9 +293,11 @@ async function downloadFileToSandbox(
     )
   }
 
-  const dest = join(agent.sandboxDir, fileName)
+  // Sanitize filename to prevent path traversal
+  const safeName = basename(fileName)
+  const dest = join(agent.sandboxDir, safeName)
   writeFileSync(dest, buffer)
-  logger.debug("File saved to sandbox", { fileName, size: buffer.length })
+  logger.debug("File saved to sandbox", { fileName: safeName, size: buffer.length })
   return dest
 }
 
@@ -420,11 +422,19 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Document message", { chatId: ctx.chat.id, fileId: doc.file_id, fileName, size: doc.file_size })
 
-      const agent = deps.getAgent(ctx.chat.id)
-      await downloadFileToSandbox(deps.botToken, ctx, doc.file_id, fileName, agent)
-
       const prompt = `I uploaded the file "${fileName}" in the current directory. ${caption}`
-      await withTyping(ctx, () => executeWithRetry(ctx, ctx.chat.id, (agent) => agent.call(prompt), prompt, deps))
+      await withTyping(ctx, () =>
+        executeWithRetry(
+          ctx,
+          ctx.chat.id,
+          async (agent) => {
+            await downloadFileToSandbox(deps.botToken, ctx, doc.file_id, fileName, agent)
+            return agent.call(prompt)
+          },
+          prompt,
+          deps
+        )
+      )
     })
   })
 

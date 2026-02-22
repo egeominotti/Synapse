@@ -27,6 +27,9 @@ export class Semaphore {
 
   /** Release a permit, unblocking the next queued caller. */
   release(): void {
+    if (this.current <= 0 && this.queue.length === 0) {
+      throw new Error("Semaphore.release() called without matching acquire()")
+    }
     this.current--
     if (this.queue.length > 0) {
       const next = this.queue.shift()!
