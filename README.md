@@ -8,7 +8,7 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 - **Telegram Bot** — Multi-user bot with per-chat sessions, photo analysis, LRU agent eviction
 - **Runtime Config** — Change all agent parameters live from Telegram (`/config`), admin-only
 - **SQLite Persistence** — Sessions, messages, config, and stats in a single atomic database
-- **Vision** — Send images via `/image` (REPL) or photo messages (Telegram)
+- **Vision** — Send images via `/image` (REPL) or photo messages (Telegram), photos persisted as BLOBs
 - **Retry & Timeout** — Exponential backoff on transient errors, configurable timeout
 - **Docker Isolation** — Optional containerized execution with resource limits
 - **Test Suite** — 114 tests covering all modules (bun:test)
@@ -154,8 +154,8 @@ bun test
 │       ▼              ▼               ▼                        │
 │  ┌────────────────────────────────────────────┐              │
 │  │            Database (SQLite)                │              │
-│  │  sessions │ messages │ telegram │ config    │              │
-│  │              neo.db (WAL mode)              │              │
+│  │  sessions │ messages │ attachments          │              │
+│  │  telegram │ config   │ neo.db (WAL mode)    │              │
 │  └────────────────────────────────────────────┘              │
 │                                                               │
 │  ┌──────────┐  ┌────────┐  ┌─────────┐  ┌───────┐          │
@@ -209,8 +209,10 @@ Agent.call(prompt)
     ▼
  HistoryManager.addMessage()  /  SessionStore.set()
     │
+    ├─ INSERT into messages (returns message_id)
+    ├─ INSERT into attachments (if photo, with BLOB + file_id)
     ▼
-Database (SQLite) → INSERT into messages / telegram_sessions
+Database (SQLite) → messages / attachments / telegram_sessions
 ```
 
 ### Database Schema
@@ -218,11 +220,12 @@ Database (SQLite) → INSERT into messages / telegram_sessions
 ```sql
 sessions          (session_id PK, created_at, updated_at)
 messages          (id PK, session_id FK, timestamp, prompt, response, duration_ms, input_tokens, output_tokens)
+attachments       (id PK, message_id FK, media_type, file_id, data BLOB, created_at)
 telegram_sessions (chat_id PK, session_id, updated_at)
 runtime_config    (key PK, value, updated_at)
 ```
 
-**Indexes:** `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id` (composite), `idx_telegram_sessions_session`
+**Indexes:** `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id` (composite), `idx_telegram_sessions_session`, `idx_attachments_message`
 
 Stats are computed via SQL aggregates — no denormalized tables.
 

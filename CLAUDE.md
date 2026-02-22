@@ -26,7 +26,7 @@ index.ts / telegram.ts          Entry points
 History   SessionStore           Persistence layer
    │         │
    ▼         ▼
-Database (src/db.ts)             SQLite — sessions, messages, telegram_sessions, runtime_config
+Database (src/db.ts)             SQLite — sessions, messages, attachments, telegram_sessions, runtime_config
         ▲
         │
 RuntimeConfig (src/runtime-config.ts)   Config manager — validates, persists, applies at runtime
@@ -90,6 +90,7 @@ bun install
 - **Concurrent I/O**: Reads stdout/stderr in parallel to prevent deadlock
 - **Graceful shutdown**: Signal handlers (SIGINT/SIGTERM) close DB before exit
 - **Atomic persistence**: SQLite WAL mode — no corrupted files on crash
+- **Photo attachments**: Telegram photos stored as BLOBs in `attachments` table, linked to messages
 - **LRU agent eviction**: Telegram bot caps agents at 500 to prevent memory leaks
 - **Runtime config**: All agent params configurable via Telegram `/config` (admin only)
 - **Cached spawn env**: `buildSpawnEnv()` cached per token to avoid per-call overhead
@@ -120,16 +121,17 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 ## Data Storage
 
 - **SQLite database**: `~/.claude-agent/neo.db` (configurable via `CLAUDE_AGENT_DB_PATH`)
-- Tables: `sessions`, `messages`, `telegram_sessions`, `runtime_config`
+- Tables: `sessions`, `messages`, `telegram_sessions`, `runtime_config`, `attachments`
 - WAL mode enabled for concurrent reads + atomic writes
 - Stats computed via SQL aggregates (single source of truth)
-- Indexes: `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id`, `idx_telegram_sessions_session`
+- Indexes: `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id`, `idx_telegram_sessions_session`, `idx_attachments_message`
 
 ## Database Schema
 
 ```sql
 sessions          (session_id TEXT PK, created_at TEXT, updated_at TEXT)
 messages          (id INTEGER PK, session_id TEXT FK, timestamp, prompt, response, duration_ms, input_tokens, output_tokens)
+attachments       (id INTEGER PK, message_id INTEGER FK, media_type TEXT, file_id TEXT, data BLOB, created_at TEXT)
 telegram_sessions (chat_id INTEGER PK, session_id TEXT, updated_at TEXT)
 runtime_config    (key TEXT PK, value TEXT, updated_at TEXT)
 ```
