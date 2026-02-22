@@ -1,8 +1,22 @@
-# Neo
+<p align="center">
+  <img src="docs/logo.svg" alt="Neo" width="600"/>
+</p>
 
-Claude AI agent platform with REPL and Telegram bot interfaces. Wraps the Claude Code CLI via process spawning — no SDK dependency.
+<p align="center">
+  <strong>Claude AI agent platform with REPL and Telegram bot interfaces.</strong><br/>
+  Wraps the Claude Code CLI via process spawning — no SDK dependency.
+</p>
 
-Built with TypeScript on Bun. SQLite persistence. Runtime configuration via Telegram admin commands.
+<p align="center">
+  <img src="https://img.shields.io/badge/runtime-Bun-f9f1e1?logo=bun&logoColor=000" alt="Bun"/>
+  <img src="https://img.shields.io/badge/language-TypeScript-3178c6?logo=typescript&logoColor=fff" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/database-SQLite-003b57?logo=sqlite&logoColor=fff" alt="SQLite"/>
+  <img src="https://img.shields.io/badge/bot-Telegram-26a5e4?logo=telegram&logoColor=fff" alt="Telegram"/>
+  <img src="https://img.shields.io/badge/AI-Claude-d4a574?logo=anthropic&logoColor=fff" alt="Claude"/>
+  <img src="https://img.shields.io/badge/tests-314_passed-brightgreen" alt="Tests"/>
+</p>
+
+---
 
 ## Features
 
