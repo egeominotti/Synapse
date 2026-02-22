@@ -24,6 +24,7 @@ import { formatForTelegram } from "./src/formatter"
 import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, buildMeta, MAX_FILE_SIZE, type TelegramDeps } from "./src/telegram/handlers"
+import { generateIdentity, formatIdentityHeader } from "./src/agent-identity"
 import { buildMemoryContext } from "./src/memory"
 import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
 import { dirname } from "path"
@@ -148,9 +149,13 @@ const scheduler = new Scheduler(db, async (job) => {
   try {
     const result = await jobAgent.call(job.prompt)
 
+    // Generate visual identity for this job
+    const identity = generateIdentity(job.jobId)
+    const header = formatIdentityHeader(identity, `⏰ Job #${job.jobId}`)
+
     // Send response to chat
     const meta = buildMeta(result)
-    const { chunks, parseMode } = formatForTelegram(result.text, `⏰ ${meta}`)
+    const { chunks, parseMode } = formatForTelegram(result.text, `${header}\n${meta}`)
     for (const chunk of chunks) {
       try {
         await bot.api.sendMessage(job.chatId, chunk, parseMode ? { parse_mode: parseMode } : {})

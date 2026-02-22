@@ -17,6 +17,7 @@ import type { ChatQueue } from "../chat-queue"
 import type { Scheduler } from "../scheduler"
 import { parseSchedule } from "../scheduler"
 import { formatForTelegram } from "../formatter"
+import { ORCHESTRATOR_IDENTITY, formatIdentityHeader } from "../agent-identity"
 import { logger } from "../logger"
 
 // ---------------------------------------------------------------------------
@@ -104,9 +105,10 @@ export async function sendSandboxFiles(ctx: Context, agent: Agent, before: FileS
   }
 }
 
-async function sendFormatted(ctx: Context, markdown: string, result: AgentCallResult): Promise<void> {
+async function sendFormatted(ctx: Context, markdown: string, result: AgentCallResult, header?: string): Promise<void> {
   const meta = buildMeta(result)
-  const { chunks, parseMode } = formatForTelegram(markdown, meta)
+  const headerLine = header ?? formatIdentityHeader(ORCHESTRATOR_IDENTITY)
+  const { chunks, parseMode } = formatForTelegram(markdown, `${headerLine}\n${meta}`)
   for (const chunk of chunks) {
     try {
       await ctx.reply(chunk, parseMode ? { parse_mode: parseMode } : {})

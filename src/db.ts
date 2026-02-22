@@ -110,49 +110,51 @@ export class Database extends DatabaseCore {
   insertJob(
     chatId: number,
     prompt: string,
-    scheduleType: "once" | "recurring" | "delay",
+    scheduleType: string,
     runAt: string,
-    intervalMs?: number
+    intervalMs?: number,
+    cronExpr?: string
   ): number {
     this.db.run(
-      `INSERT INTO scheduled_jobs (chat_id, prompt, schedule_type, run_at, interval_ms, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [chatId, prompt, scheduleType, runAt, intervalMs ?? null, new Date().toISOString()]
+      `INSERT INTO scheduled_jobs (chat_id, prompt, schedule_type, run_at, interval_ms, cron_expr, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [chatId, prompt, scheduleType, runAt, intervalMs ?? null, cronExpr ?? null, new Date().toISOString()]
     )
     const row = this.db.query("SELECT last_insert_rowid() as id").get() as { id: number }
     return row.id
   }
 
-  getDueJobs(now: string): Array<{
+  getActiveJobs(): Array<{
     id: number
     chat_id: number
     prompt: string
     schedule_type: string
     run_at: string
     interval_ms: number | null
+    cron_expr: string | null
   }> {
     return this.db
       .query(
-        `SELECT id, chat_id, prompt, schedule_type, run_at, interval_ms
-         FROM scheduled_jobs WHERE active = 1 AND run_at <= ? ORDER BY run_at ASC`
+        `SELECT id, chat_id, prompt, schedule_type, run_at, interval_ms, cron_expr
+         FROM scheduled_jobs WHERE active = 1 ORDER BY id ASC`
       )
-      .all(now) as Array<{
+      .all() as Array<{
       id: number
       chat_id: number
       prompt: string
       schedule_type: string
       run_at: string
       interval_ms: number | null
+      cron_expr: string | null
     }>
   }
 
-  updateJobAfterRun(jobId: number, nextRunAt: string | null): void {
-    const now = new Date().toISOString()
-    if (nextRunAt) {
-      this.db.run("UPDATE scheduled_jobs SET last_run_at = ?, run_at = ? WHERE id = ?", [now, nextRunAt, jobId])
-    } else {
-      this.db.run("UPDATE scheduled_jobs SET last_run_at = ?, active = 0 WHERE id = ?", [now, jobId])
-    }
+  markJobDone(jobId: number): void {
+    this.db.run("UPDATE scheduled_jobs SET last_run_at = ?, active = 0 WHERE id = ?", [new Date().toISOString(), jobId])
+  }
+
+  updateJobLastRun(jobId: number): void {
+    this.db.run("UPDATE scheduled_jobs SET last_run_at = ? WHERE id = ?", [new Date().toISOString(), jobId])
   }
 
   getJobsByChat(chatId: number): Array<{
@@ -161,11 +163,12 @@ export class Database extends DatabaseCore {
     schedule_type: string
     run_at: string
     interval_ms: number | null
+    cron_expr: string | null
     created_at: string
   }> {
     return this.db
       .query(
-        `SELECT id, prompt, schedule_type, run_at, interval_ms, created_at
+        `SELECT id, prompt, schedule_type, run_at, interval_ms, cron_expr, created_at
          FROM scheduled_jobs WHERE chat_id = ? AND active = 1 ORDER BY run_at ASC`
       )
       .all(chatId) as Array<{
@@ -174,6 +177,7 @@ export class Database extends DatabaseCore {
       schedule_type: string
       run_at: string
       interval_ms: number | null
+      cron_expr: string | null
       created_at: string
     }>
   }

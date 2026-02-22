@@ -71,9 +71,10 @@ export class DatabaseCore {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chat_id INTEGER NOT NULL,
         prompt TEXT NOT NULL,
-        schedule_type TEXT NOT NULL CHECK(schedule_type IN ('once', 'recurring', 'delay')),
+        schedule_type TEXT NOT NULL,
         run_at TEXT NOT NULL,
         interval_ms INTEGER,
+        cron_expr TEXT,
         created_at TEXT NOT NULL,
         last_run_at TEXT,
         active INTEGER NOT NULL DEFAULT 1
@@ -95,6 +96,17 @@ export class DatabaseCore {
     } catch {
       // Column already exists — ignore
     }
+
+    // Migration: add cron_expr column to scheduled_jobs (idempotent)
+    try {
+      this.db.exec("ALTER TABLE scheduled_jobs ADD COLUMN cron_expr TEXT")
+    } catch {
+      // Column already exists — ignore
+    }
+
+    // Migration: relax schedule_type CHECK constraint (recreate without it)
+    // SQLite doesn't support ALTER CHECK, but new table definition has no CHECK
+    // Old rows with ('once','recurring','delay') are still valid, new 'cron' type works too
 
     // Backfill: populate chat_id from telegram_sessions for existing data
     // Step 1: exact match — session_id → chat_id

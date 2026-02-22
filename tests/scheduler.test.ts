@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test"
 import { Database } from "../src/db"
-import { Scheduler, parseSchedule } from "../src/scheduler"
+import { Scheduler, parseSchedule, toCronExpr } from "../src/scheduler"
 import type { ScheduleSpec } from "../src/scheduler"
 import { mkdtempSync, rmSync } from "fs"
 import { join } from "path"
@@ -162,6 +162,73 @@ describe("parseSchedule", () => {
     const spec = parseSchedule("every 30s", now)
     expect(spec.intervalMs).toBe(30_000)
   })
+
+  // --- Raw cron expressions ---
+
+  it('parses "cron */5 * * * *" (5-field standard)', () => {
+    const spec = parseSchedule("cron */5 * * * *")
+    expect(spec.type).toBe("cron")
+    expect(spec.cronExpr).toBe("*/5 * * * *")
+    expect(spec.runAt).toBeInstanceOf(Date)
+  })
+
+  it('parses "cron */30 * * * * *" (6-field with seconds)', () => {
+    const spec = parseSchedule("cron */30 * * * * *")
+    expect(spec.type).toBe("cron")
+    expect(spec.cronExpr).toBe("*/30 * * * * *")
+  })
+
+  it('parses "cron 0 0 9 * * *" (daily at 9am with seconds)', () => {
+    const spec = parseSchedule("cron 0 0 9 * * *")
+    expect(spec.type).toBe("cron")
+    expect(spec.cronExpr).toBe("0 0 9 * * *")
+  })
+
+  it("rejects invalid cron expression", () => {
+    expect(() => parseSchedule("cron invalid")).toThrow()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// toCronExpr
+// ---------------------------------------------------------------------------
+
+describe("toCronExpr", () => {
+  it("returns cronExpr if already set", () => {
+    const spec: ScheduleSpec = { type: "cron", runAt: new Date(), cronExpr: "0 0 9 * * *" }
+    expect(toCronExpr(spec)).toBe("0 0 9 * * *")
+  })
+
+  it("returns seconds-based cron for <60s interval", () => {
+    const spec: ScheduleSpec = { type: "recurring", runAt: new Date(), intervalMs: 30_000 }
+    expect(toCronExpr(spec)).toBe("*/30 * * * * *")
+  })
+
+  it("returns minutes-based cron for <1h interval", () => {
+    const spec: ScheduleSpec = { type: "recurring", runAt: new Date(), intervalMs: 5 * 60_000 }
+    expect(toCronExpr(spec)).toBe("0 */5 * * * *")
+  })
+
+  it("returns hours-based cron for <24h interval", () => {
+    const spec: ScheduleSpec = { type: "recurring", runAt: new Date(), intervalMs: 2 * 3_600_000 }
+    expect(toCronExpr(spec)).toBe("0 0 */2 * * *")
+  })
+
+  it("returns daily cron at specific time for 24h interval", () => {
+    const runAt = new Date("2025-06-15T09:30:00")
+    const spec: ScheduleSpec = { type: "recurring", runAt, intervalMs: 86_400_000 }
+    expect(toCronExpr(spec)).toBe(`0 30 9 * * *`)
+  })
+
+  it("returns undefined for non-recurring type", () => {
+    const spec: ScheduleSpec = { type: "once", runAt: new Date() }
+    expect(toCronExpr(spec)).toBeUndefined()
+  })
+
+  it("returns undefined for delay type", () => {
+    const spec: ScheduleSpec = { type: "delay", runAt: new Date() }
+    expect(toCronExpr(spec)).toBeUndefined()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -180,38 +247,45 @@ describe("Database scheduled_jobs", () => {
     expect(jobs[0].schedule_type).toBe("once")
   })
 
-  it("getDueJobs returns only due jobs", () => {
-    const past = new Date(Date.now() - 60_000).toISOString()
-    const future = new Date(Date.now() + 3_600_000).toISOString()
-
-    db.insertJob(1, "due", "once", past)
-    db.insertJob(1, "not due", "once", future)
-
-    const due = db.getDueJobs(new Date().toISOString())
-    expect(due).toHaveLength(1)
-    expect(due[0].prompt).toBe("due")
-  })
-
-  it("updateJobAfterRun deactivates one-shot jobs", () => {
-    const past = new Date(Date.now() - 60_000).toISOString()
-    const id = db.insertJob(1, "once", "once", past)
-
-    db.updateJobAfterRun(id, null)
-
-    const jobs = db.getJobsByChat(1)
-    expect(jobs).toHaveLength(0) // deactivated
-  })
-
-  it("updateJobAfterRun reschedules recurring jobs", () => {
-    const past = new Date(Date.now() - 60_000).toISOString()
-    const nextRun = new Date(Date.now() + 86_400_000).toISOString()
-    const id = db.insertJob(1, "recurring", "recurring", past, 86_400_000)
-
-    db.updateJobAfterRun(id, nextRun)
+  it("inserts job with cron_expr", () => {
+    const runAt = new Date(Date.now() + 60_000).toISOString()
+    db.insertJob(1, "cron job", "cron", runAt, undefined, "*/5 * * * *")
 
     const jobs = db.getJobsByChat(1)
     expect(jobs).toHaveLength(1)
-    expect(jobs[0].run_at).toBe(nextRun)
+    expect(jobs[0].cron_expr).toBe("*/5 * * * *")
+    expect(jobs[0].schedule_type).toBe("cron")
+  })
+
+  it("getActiveJobs returns all active jobs", () => {
+    const runAt = new Date(Date.now() + 60_000).toISOString()
+    db.insertJob(1, "a", "once", runAt)
+    db.insertJob(2, "b", "recurring", runAt, 60_000, "0 */1 * * * *")
+
+    const active = db.getActiveJobs()
+    expect(active).toHaveLength(2)
+    expect(active[0].prompt).toBe("a")
+    expect(active[1].prompt).toBe("b")
+    expect(active[1].cron_expr).toBe("0 */1 * * * *")
+  })
+
+  it("markJobDone deactivates a job", () => {
+    const runAt = new Date(Date.now() + 60_000).toISOString()
+    const id = db.insertJob(1, "test", "once", runAt)
+    db.markJobDone(id)
+
+    const jobs = db.getJobsByChat(1)
+    expect(jobs).toHaveLength(0) // inactive
+    expect(db.getActiveJobs()).toHaveLength(0)
+  })
+
+  it("updateJobLastRun sets last_run_at without deactivating", () => {
+    const runAt = new Date(Date.now() + 60_000).toISOString()
+    const id = db.insertJob(1, "recurring", "recurring", runAt, 60_000)
+    db.updateJobLastRun(id)
+
+    const jobs = db.getJobsByChat(1)
+    expect(jobs).toHaveLength(1) // still active
   })
 
   it("deleteJob only deletes own chat's jobs", () => {
@@ -225,6 +299,17 @@ describe("Database scheduled_jobs", () => {
     // Right chat
     expect(db.deleteJob(id, 123)).toBe(true)
     expect(db.getJobsByChat(123)).toHaveLength(0)
+  })
+
+  it("deleteAllJobs deletes all jobs for a chat", () => {
+    const runAt = new Date(Date.now() + 60_000).toISOString()
+    db.insertJob(1, "a", "once", runAt)
+    db.insertJob(1, "b", "once", runAt)
+    db.insertJob(2, "c", "once", runAt)
+
+    expect(db.deleteAllJobs(1)).toBe(2)
+    expect(db.getJobsByChat(1)).toHaveLength(0)
+    expect(db.getJobsByChat(2)).toHaveLength(1)
   })
 
   it("countActiveJobs counts correctly", () => {
@@ -245,10 +330,7 @@ describe("Database scheduled_jobs", () => {
 
 describe("Scheduler", () => {
   it("createJob returns a job ID", () => {
-    const executed: number[] = []
-    const sched = new Scheduler(db, async (job) => {
-      executed.push(job.jobId)
-    })
+    const sched = new Scheduler(db, async () => {})
 
     const spec: ScheduleSpec = {
       type: "once",
@@ -256,6 +338,7 @@ describe("Scheduler", () => {
     }
     const id = sched.createJob(123, "hello", spec)
     expect(id).toBeGreaterThan(0)
+    sched.stop()
   })
 
   it("enforces max jobs per chat", () => {
@@ -267,6 +350,7 @@ describe("Scheduler", () => {
     }
 
     expect(() => sched.createJob(1, "one too many", spec)).toThrow("Limite raggiunto")
+    sched.stop()
   })
 
   it("max jobs limit is per chat", () => {
@@ -279,9 +363,10 @@ describe("Scheduler", () => {
 
     // Different chat should still work
     expect(() => sched.createJob(2, "other chat", spec)).not.toThrow()
+    sched.stop()
   })
 
-  it("createJob stores correct interval_ms for recurring", () => {
+  it("createJob stores correct interval_ms and cron_expr for recurring", () => {
     const sched = new Scheduler(db, async () => {})
     const spec: ScheduleSpec = {
       type: "recurring",
@@ -293,5 +378,54 @@ describe("Scheduler", () => {
     expect(jobs).toHaveLength(1)
     expect(jobs[0].interval_ms).toBe(30_000)
     expect(jobs[0].schedule_type).toBe("recurring")
+    expect(jobs[0].cron_expr).toBe("*/30 * * * * *")
+    sched.stop()
+  })
+
+  it("cancelJob stops cron and removes from DB", () => {
+    const sched = new Scheduler(db, async () => {})
+    const spec: ScheduleSpec = {
+      type: "recurring",
+      runAt: new Date(Date.now() + 60_000),
+      intervalMs: 60_000,
+    }
+    const id = sched.createJob(1, "test", spec)
+    expect(db.getJobsByChat(1)).toHaveLength(1)
+
+    expect(sched.cancelJob(id, 1)).toBe(true)
+    expect(db.getJobsByChat(1)).toHaveLength(0)
+    sched.stop()
+  })
+
+  it("cancelAllJobs stops all crons for a chat", () => {
+    const sched = new Scheduler(db, async () => {})
+    const spec: ScheduleSpec = {
+      type: "recurring",
+      runAt: new Date(Date.now() + 60_000),
+      intervalMs: 60_000,
+    }
+    sched.createJob(1, "a", spec)
+    sched.createJob(1, "b", spec)
+    sched.createJob(2, "c", spec)
+
+    expect(sched.cancelAllJobs(1)).toBe(2)
+    expect(db.getJobsByChat(1)).toHaveLength(0)
+    expect(db.getJobsByChat(2)).toHaveLength(1)
+    sched.stop()
+  })
+
+  it("start() loads active jobs from DB and creates Cron instances", () => {
+    // Insert jobs directly into DB
+    const runAt = new Date(Date.now() + 60_000).toISOString()
+    db.insertJob(1, "job a", "recurring", runAt, 60_000, "0 */1 * * * *")
+    db.insertJob(1, "job b", "once", runAt)
+
+    const sched = new Scheduler(db, async () => {})
+    sched.start()
+
+    // Both should be loaded — cancelAllJobs should stop them
+    const count = sched.cancelAllJobs(1)
+    expect(count).toBe(2)
+    sched.stop()
   })
 })
