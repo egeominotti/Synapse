@@ -5,8 +5,8 @@
  * Supports both text prompts and vision (image + text) via stream-json input.
  */
 
-import { existsSync, mkdtempSync, writeFileSync } from "fs"
-import { extname, join } from "path"
+import { existsSync, mkdtempSync, readdirSync, statSync, writeFileSync } from "fs"
+import { extname, join, relative } from "path"
 import { tmpdir } from "os"
 import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage } from "./types"
 import { logger } from "./logger"
@@ -177,6 +177,39 @@ export class Agent {
     ].join("\n")
 
     writeFileSync(join(this.sandboxDir, "CLAUDE.md"), rules)
+  }
+
+  /**
+   * List all user-created files in the sandbox (excludes CLAUDE.md).
+   * Returns relative paths with their modification times.
+   */
+  listSandboxFiles(): Array<{ path: string; mtimeMs: number }> {
+    const results: Array<{ path: string; mtimeMs: number }> = []
+    const walk = (dir: string): void => {
+      let names: string[]
+      try {
+        names = readdirSync(dir) as string[]
+      } catch {
+        return
+      }
+      for (const name of names) {
+        const fullPath = join(dir, name)
+        try {
+          const stat = statSync(fullPath)
+          if (stat.isDirectory()) {
+            walk(fullPath)
+          } else if (stat.isFile()) {
+            const rel = relative(this.sandboxDir, fullPath)
+            if (rel === "CLAUDE.md") continue
+            results.push({ path: rel, mtimeMs: stat.mtimeMs })
+          }
+        } catch {
+          /* file may have been deleted between readdir and stat */
+        }
+      }
+    }
+    walk(this.sandboxDir)
+    return results
   }
 
   getSessionId(): string | null {

@@ -19,6 +19,8 @@
  */
 
 import { Bot, InputFile, type Context } from "grammy"
+import { readFileSync } from "fs"
+import { join, extname } from "path"
 import { loadConfig } from "./src/config"
 import { Database } from "./src/db"
 import { Agent } from "./src/agent"
@@ -123,6 +125,7 @@ const botStartedAt = Date.now()
 // Scheduler: executes due jobs via Agent + sends response to chat
 const scheduler = new Scheduler(db, async (job) => {
   const agent = getAgent(job.chatId)
+  const before = snapshotSandbox(agent)
   const result = await agent.call(job.prompt)
 
   // Persist message
@@ -144,6 +147,22 @@ const scheduler = new Scheduler(db, async (job) => {
       await bot.api.sendMessage(job.chatId, chunk, parseMode ? { parse_mode: parseMode } : {})
     } catch {
       await bot.api.sendMessage(job.chatId, chunk)
+    }
+  }
+
+  // Send any files created by the scheduled job
+  const after = agent.listSandboxFiles()
+  const newFiles = after.filter((f) => {
+    const prevMtime = before.get(f.path)
+    return prevMtime === undefined || f.mtimeMs > prevMtime
+  })
+  for (const file of newFiles) {
+    try {
+      const data = readFileSync(join(agent.sandboxDir, file.path))
+      if (data.length === 0 || data.length > MAX_FILE_SIZE) continue
+      await bot.api.sendDocument(job.chatId, new InputFile(data, file.path), { caption: `📎 ${file.path}` })
+    } catch (err) {
+      logger.warn("Failed to send scheduled job file", { path: file.path, error: String(err) })
     }
   }
 })
@@ -182,6 +201,60 @@ async function withTyping(ctx: Context, fn: () => Promise<void>): Promise<void> 
     await fn()
   } finally {
     clearInterval(typingInterval)
+  }
+}
+
+/** Max file size to send via Telegram (50 MB limit, we cap at 20 MB) */
+const MAX_FILE_SIZE = 20 * 1024 * 1024
+
+/** Snapshot of sandbox files before a call — used to detect new files */
+type FileSnapshot = Map<string, number>
+
+/** Take a snapshot of all files in the agent's sandbox */
+function snapshotSandbox(agent: Agent): FileSnapshot {
+  const files = agent.listSandboxFiles()
+  return new Map(files.map((f) => [f.path, f.mtimeMs]))
+}
+
+/** Send files created/modified in the sandbox since the snapshot */
+async function sendSandboxFiles(ctx: Context, agent: Agent, before: FileSnapshot): Promise<void> {
+  const after = agent.listSandboxFiles()
+  const newFiles = after.filter((f) => {
+    const prevMtime = before.get(f.path)
+    return prevMtime === undefined || f.mtimeMs > prevMtime
+  })
+
+  if (newFiles.length === 0) return
+
+  for (const file of newFiles) {
+    const fullPath = join(agent.sandboxDir, file.path)
+    try {
+      const data = readFileSync(fullPath)
+      if (data.length === 0) continue
+      if (data.length > MAX_FILE_SIZE) {
+        await ctx.reply(
+          `⚠️ File troppo grande per Telegram: ${file.path} (${(data.length / 1024 / 1024).toFixed(1)} MB)`
+        )
+        continue
+      }
+
+      const ext = extname(file.path).toLowerCase()
+      const imageExts = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"]
+
+      if (imageExts.includes(ext)) {
+        await ctx.replyWithDocument(new InputFile(data, file.path), {
+          caption: `📎 ${file.path}`,
+        })
+      } else {
+        await ctx.replyWithDocument(new InputFile(data, file.path), {
+          caption: `📎 ${file.path}`,
+        })
+      }
+
+      logger.debug("Sandbox file sent", { path: file.path, size: data.length })
+    } catch (err) {
+      logger.warn("Failed to send sandbox file", { path: file.path, error: String(err) })
+    }
   }
 }
 
@@ -583,6 +656,7 @@ async function handleTextPrompt(ctx: Context, prompt: string): Promise<void> {
   await withTyping(ctx, async () => {
     try {
       const agent = getAgent(chatId)
+      const before = snapshotSandbox(agent)
       const result = await agent.call(prompt)
 
       // Persist message to DB
@@ -596,6 +670,7 @@ async function handleTextPrompt(ctx: Context, prompt: string): Promise<void> {
       })
 
       await sendFormatted(ctx, result.text, result)
+      await sendSandboxFiles(ctx, agent, before)
       await persistSession(chatId, agent)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -635,6 +710,7 @@ async function handlePhotoPrompt(ctx: Context, fileId: string, caption: string):
       const { base64, mediaType } = await downloadFileAsBase64(ctx, fileId)
 
       const agent = getAgent(chatId)
+      const before = snapshotSandbox(agent)
       const result = await agent.callWithRawImage(mediaType, base64, caption)
 
       // Persist message + photo attachment to DB
@@ -651,6 +727,7 @@ async function handlePhotoPrompt(ctx: Context, fileId: string, caption: string):
       }
 
       await sendFormatted(ctx, result.text, result)
+      await sendSandboxFiles(ctx, agent, before)
       await persistSession(chatId, agent)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
