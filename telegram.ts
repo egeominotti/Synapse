@@ -228,7 +228,7 @@ await store.load()
 logger.info("Sessions loaded", { count: store.size })
 
 // Save known chat IDs before clearing stale sessions (for startup message)
-const knownChatIds = db.getAllTelegramSessions().map((s) => s.chat_id)
+const knownChatIds = db.getAllKnownChatIds()
 
 // Clear stale Claude CLI sessions — they don't survive process restarts
 store.clearAll()

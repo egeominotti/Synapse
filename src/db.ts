@@ -38,6 +38,20 @@ export class Database extends DatabaseCore {
     }>
   }
 
+  /** Get all known chat IDs from both telegram_sessions and sessions tables. */
+  getAllKnownChatIds(): number[] {
+    const rows = this.db
+      .query(
+        `SELECT DISTINCT chat_id FROM (
+          SELECT chat_id FROM telegram_sessions
+          UNION
+          SELECT chat_id FROM sessions WHERE chat_id IS NOT NULL
+        )`
+      )
+      .all() as Array<{ chat_id: number }>
+    return rows.map((r) => r.chat_id)
+  }
+
   countTelegramSessions(): number {
     const row = this.db.query("SELECT COUNT(*) as count FROM telegram_sessions").get() as { count: number }
     return row.count
