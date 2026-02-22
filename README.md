@@ -15,7 +15,9 @@ AI agent powered by Claude Code CLI with two interfaces: interactive REPL and Te
 - **Session Export** — `/export` downloads the full conversation as a Markdown file
 - **Retry & Timeout** — Exponential backoff on transient errors, configurable timeout
 - **Docker Isolation** — Optional containerized execution with resource limits
-- **Test Suite** — 148 tests across 10 files (bun:test)
+- **Job Scheduler** — Schedule prompts: `at 18:00`, `every 09:00`, `in 30m` (SQLite-backed, 60s ticker)
+- **Sandbox Isolation** — Each Agent runs in `/tmp/neo-agent-*` with cross-platform safety rules
+- **Test Suite** — 167 tests across 11 files (bun:test)
 - **CI/CD** — GitHub Actions pipeline + Husky pre-commit hooks (typecheck, lint, format)
 
 ## Requirements
@@ -85,15 +87,18 @@ bun run telegram.ts
 
 #### Bot Commands
 
-| Command   | Description                        |
-| --------- | ---------------------------------- |
-| `/start`  | Welcome message                    |
-| `/help`   | Available commands                 |
-| `/reset`  | Clear session                      |
-| `/stats`  | Session statistics                 |
-| `/export` | Download conversation as file      |
-| `/ping`   | Bot health check                   |
-| `/config` | Runtime configuration (admin only) |
+| Command            | Description                                         |
+| ------------------ | --------------------------------------------------- |
+| `/start`           | Welcome message                                     |
+| `/help`            | Available commands                                  |
+| `/reset`           | Clear session                                       |
+| `/stats`           | Session statistics                                  |
+| `/export`          | Download conversation as file                       |
+| `/ping`            | Bot health check                                    |
+| `/schedule`        | Schedule a job (`at HH:MM`, `every HH:MM`, `in Nm`) |
+| `/jobs`            | List active scheduled jobs                          |
+| `/job delete <id>` | Delete a scheduled job                              |
+| `/config`          | Runtime configuration (admin only)                  |
 
 Send photos with optional captions for vision analysis.
 Edit a sent message to re-send it to Claude.
@@ -128,7 +133,7 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 ### Development
 
 ```bash
-bun test              # Run 148 tests
+bun test              # Run 167 tests
 bun run typecheck     # TypeScript check
 bun run lint          # ESLint
 bun run format:check  # Prettier check
@@ -167,12 +172,15 @@ bun run format        # Auto-format
 │  ┌────────────────────────────────────────────┐              │
 │  │            Database (SQLite)                │              │
 │  │  sessions │ messages │ attachments          │              │
-│  │  telegram │ config   │ neo.db (WAL mode)    │              │
+│  │  telegram │ config   │ jobs │ neo.db (WAL)   │              │
 │  └────────────────────────────────────────────┘              │
 │                                                               │
-│  ┌───────────┐ ┌───────────┐ ┌────────┐ ┌───────┐          │
-│  │ ChatQueue │ │ Formatter │ │ Logger │ │ Utils │          │
-│  └───────────┘ └───────────┘ └────────┘ └───────┘          │
+│  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────┐      │
+│  │ ChatQueue │ │ Formatter │ │ Scheduler │ │ Logger │      │
+│  └───────────┘ └───────────┘ └───────────┘ └────────┘      │
+│  ┌───────┐                                                  │
+│  │ Utils │                                                  │
+│  └───────┘                                                  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -180,13 +188,14 @@ bun run format        # Auto-format
 
 ```
 index.ts             REPL entry point — wires Agent + HistoryManager + Repl
-telegram.ts          Telegram bot — queue, formatter, /config, /export, /ping
+telegram.ts          Telegram bot — queue, formatter, scheduler, /config, /export, /ping
 src/
-  agent.ts           Claude CLI wrapper (spawn, retry, timeout, JSON/stream parsing)
+  agent.ts           Claude CLI wrapper (spawn, retry, timeout, JSON/stream, sandbox)
   chat-queue.ts      Per-chat serial message queue (prevents race conditions)
   config.ts          Environment-based configuration with defaults
   formatter.ts       Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  Runtime config manager (validate, persist, apply via /config)
+  scheduler.ts       Job scheduler (SQLite-backed, 60s ticker, once/recurring/delay)
   db.ts              SQLite layer (bun:sqlite, WAL mode, schema, CRUD, indexes)
   history.ts         Session & message persistence (SQLite-backed)
   repl.ts            Interactive terminal with 8 slash commands
@@ -205,6 +214,7 @@ tests/
   runtime-config.test.ts  21 tests — get/set, validation, reset, persistence
   formatter.test.ts       29 tests — Markdown→HTML conversion, chunking
   chat-queue.test.ts       5 tests — serial ordering, concurrency, error recovery
+  scheduler.test.ts       19 tests — parseSchedule, DB CRUD, Scheduler limits
   utils.test.ts            3 tests — formatDuration
   logger.test.ts           9 tests — levels, filtering, session ID
 ```
@@ -245,9 +255,10 @@ messages          (id PK, session_id FK, timestamp, prompt, response, duration_m
 attachments       (id PK, message_id FK, media_type, file_id, data BLOB, created_at)
 telegram_sessions (chat_id PK, session_id, updated_at)
 runtime_config    (key PK, value, updated_at)
+scheduled_jobs    (id PK, chat_id, prompt, schedule_type, run_at, interval_ms, created_at, last_run_at, active)
 ```
 
-**Indexes:** `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id` (composite), `idx_telegram_sessions_session`, `idx_attachments_message`
+**Indexes:** `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id`, `idx_telegram_sessions_session`, `idx_attachments_message`, `idx_scheduled_jobs_active`, `idx_scheduled_jobs_chat`
 
 Stats are computed via SQL aggregates — no denormalized tables.
 

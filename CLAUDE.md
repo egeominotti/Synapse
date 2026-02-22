@@ -10,7 +10,7 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Language**: TypeScript (strict mode, ESNext target)
 - **Database**: SQLite via `bun:sqlite` (WAL mode)
 - **Telegram**: grammy v1.40+
-- **Testing**: bun:test (148 tests)
+- **Testing**: bun:test (167 tests, 11 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
@@ -28,11 +28,11 @@ index.ts / telegram.ts          Entry points
 History   SessionStore           Persistence layer
    │         │
    ▼         ▼
-Database (src/db.ts)             SQLite — sessions, messages, attachments, telegram_sessions, runtime_config
+Database (src/db.ts)             SQLite — sessions, messages, attachments, telegram_sessions, runtime_config, scheduled_jobs
         ▲
-   ┌────┴────┐
-   ▼         ▼
-RuntimeConfig   ChatQueue        Config manager + per-chat serial queue
+   ┌────┼────────┐
+   ▼    ▼        ▼
+RuntimeConfig  ChatQueue  Scheduler   Config + queue + job scheduler
 ```
 
 ## Project Structure
@@ -41,11 +41,12 @@ RuntimeConfig   ChatQueue        Config manager + per-chat serial queue
 index.ts             → REPL entry point
 telegram.ts          → Telegram bot entry point (commands, queue, formatter)
 src/
-  agent.ts           → Claude CLI wrapper (spawn, retry, timeout, vision)
+  agent.ts           → Claude CLI wrapper (spawn, retry, timeout, vision, sandbox)
   chat-queue.ts      → Per-chat serial message queue (prevents race conditions)
   config.ts          → Env-based configuration (startup defaults)
   formatter.ts       → Markdown → Telegram HTML converter + smart chunking
   runtime-config.ts  → Runtime configuration manager (Telegram /config)
+  scheduler.ts       → Job scheduler (SQLite-backed, 60s ticker, once/recurring/delay)
   db.ts              → SQLite database layer (bun:sqlite, WAL mode)
   history.ts         → Session & message persistence (SQLite-backed)
   repl.ts            → Interactive terminal with slash commands
@@ -64,6 +65,7 @@ tests/
   runtime-config.test.ts  → RuntimeConfig get/set/reset/validation (21 tests)
   formatter.test.ts       → Markdown→HTML conversion + chunking (29 tests)
   chat-queue.test.ts      → Serial queue ordering + concurrency (5 tests)
+  scheduler.test.ts       → parseSchedule + DB CRUD + Scheduler limits (19 tests)
   utils.test.ts           → formatDuration (3 tests)
   logger.test.ts          → Logger levels and output (9 tests)
 ```
@@ -112,6 +114,9 @@ bun install
 - **HTML formatted output**: Markdown → Telegram HTML conversion with smart chunking and fallback
 - **Edited message support**: Re-processes edited messages through Claude with `[Messaggio modificato]` prefix
 - **Runtime config**: All agent params configurable via Telegram `/config` (admin only)
+- **Job scheduler**: SQLite-backed, 60s ticker, supports once/recurring/delay schedules
+- **Sandbox isolation**: Each Agent runs in a temp directory (`/tmp/neo-agent-*`) with CLAUDE.md safety rules
+- **Cross-platform safety rules**: Comprehensive rules prevent destructive operations on Linux, macOS, Windows
 - **Cached spawn env**: `buildSpawnEnv()` cached per token to avoid per-call overhead
 
 ## Configuration
@@ -140,10 +145,10 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 ## Data Storage
 
 - **SQLite database**: `~/.claude-agent/neo.db` (configurable via `CLAUDE_AGENT_DB_PATH`)
-- Tables: `sessions`, `messages`, `attachments`, `telegram_sessions`, `runtime_config`
+- Tables: `sessions`, `messages`, `attachments`, `telegram_sessions`, `runtime_config`, `scheduled_jobs`
 - WAL mode enabled for concurrent reads + atomic writes
 - Stats computed via SQL aggregates (single source of truth)
-- Indexes: `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id`, `idx_telegram_sessions_session`, `idx_attachments_message`
+- Indexes: `idx_messages_session`, `idx_messages_timestamp`, `idx_messages_session_id`, `idx_telegram_sessions_session`, `idx_attachments_message`, `idx_scheduled_jobs_active`, `idx_scheduled_jobs_chat`
 
 ## Database Schema
 
@@ -153,6 +158,7 @@ messages          (id INTEGER PK, session_id TEXT FK, timestamp, prompt, respons
 attachments       (id INTEGER PK, message_id INTEGER FK, media_type TEXT, file_id TEXT, data BLOB, created_at TEXT)
 telegram_sessions (chat_id INTEGER PK, session_id TEXT, updated_at TEXT)
 runtime_config    (key TEXT PK, value TEXT, updated_at TEXT)
+scheduled_jobs    (id INTEGER PK, chat_id INTEGER, prompt TEXT, schedule_type TEXT, run_at TEXT, interval_ms INTEGER, created_at TEXT, last_run_at TEXT, active INTEGER)
 ```
 
 ## Conventions
