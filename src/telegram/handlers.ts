@@ -311,34 +311,33 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     // Immediate typing feedback — before queue, before anything
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
 
-    // Detect free-text schedule intent
-    const schedule = parseFreetextSchedule(prompt)
-    if (schedule) {
-      try {
-        const spec = parseSchedule(schedule.scheduleExpr)
-        const jobId = deps.scheduler.createJob(ctx.chat.id, schedule.prompt, spec)
-        const runAtStr = spec.runAt.toLocaleString("it-IT", { timeZone: "Europe/Rome" })
-        const typeLabel =
-          spec.type === "recurring" ? "🔄 Ricorrente" : spec.type === "delay" ? "⏳ Delay" : "📌 Una volta"
-        const intervalInfo =
-          spec.intervalMs && spec.intervalMs < 86_400_000
-            ? ` (ogni ${spec.intervalMs >= 3_600_000 ? `${spec.intervalMs / 3_600_000}h` : spec.intervalMs >= 60_000 ? `${spec.intervalMs / 60_000}m` : `${spec.intervalMs / 1_000}s`})`
-            : ""
-
-        await ctx.reply(
-          `✅ Job #${jobId} creato\n\n` +
-            `${typeLabel}${intervalInfo}\n` +
-            `Prossima esecuzione: *${runAtStr}*\n` +
-            `Prompt: _${schedule.prompt.slice(0, 100)}${schedule.prompt.length > 100 ? "..." : ""}_`,
-          { parse_mode: "Markdown" }
-        )
-        return
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        await ctx.reply(`❌ ${msg}`)
-        return
-      }
-    }
+    // Free-text schedule detection (DISABLED)
+    // const schedule = parseFreetextSchedule(prompt)
+    // if (schedule) {
+    //   try {
+    //     const spec = parseSchedule(schedule.scheduleExpr)
+    //     const jobId = deps.scheduler.createJob(ctx.chat.id, schedule.prompt, spec)
+    //     const runAtStr = spec.runAt.toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+    //     const typeLabel =
+    //       spec.type === "recurring" ? "🔄 Ricorrente" : spec.type === "delay" ? "⏳ Delay" : "📌 Una volta"
+    //     const intervalInfo =
+    //       spec.intervalMs && spec.intervalMs < 86_400_000
+    //         ? ` (ogni ${spec.intervalMs >= 3_600_000 ? `${spec.intervalMs / 3_600_000}h` : spec.intervalMs >= 60_000 ? `${spec.intervalMs / 60_000}m` : `${spec.intervalMs / 1_000}s`})`
+    //         : ""
+    //     await ctx.reply(
+    //       `✅ Job #${jobId} creato\n\n` +
+    //         `${typeLabel}${intervalInfo}\n` +
+    //         `Prossima esecuzione: *${runAtStr}*\n` +
+    //         `Prompt: _${schedule.prompt.slice(0, 100)}${schedule.prompt.length > 100 ? "..." : ""}_`,
+    //       { parse_mode: "Markdown" }
+    //     )
+    //     return
+    //   } catch (err) {
+    //     const msg = err instanceof Error ? err.message : String(err)
+    //     await ctx.reply(`❌ ${msg}`)
+    //     return
+    //   }
+    // }
 
     await deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Text message", { chatId: ctx.chat.id, length: prompt.length })
