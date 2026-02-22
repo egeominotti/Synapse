@@ -1,7 +1,15 @@
 /**
  * MCP (Model Context Protocol) server configuration.
  * Generates and manages the MCP config file used by Claude CLI.
- * Default servers: Memory (knowledge graph) + Sequential Thinking.
+ *
+ * Default servers (always active):
+ *   - Memory          — persistent knowledge graph
+ *   - Sequential Thinking — structured reasoning
+ *   - Fetch           — read any URL / webpage
+ *   - Filesystem      — file access (scoped to sandbox)
+ *   - Git             — clone, diff, log, blame
+ *   - SQLite          — query SQLite databases
+ *   - Everything      — universal file search
  */
 
 import { writeFileSync, mkdirSync } from "fs"
@@ -20,6 +28,7 @@ export interface McpConfig {
 
 const DEFAULT_MCP_SERVERS: McpConfig = {
   mcpServers: {
+    // --- Node.js servers (npx) ---
     memory: {
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-memory"],
@@ -27,6 +36,27 @@ const DEFAULT_MCP_SERVERS: McpConfig = {
     "sequential-thinking": {
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+    },
+    filesystem: {
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem"],
+    },
+    everything: {
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-everything"],
+    },
+    // --- Python servers (uvx) ---
+    fetch: {
+      command: "uvx",
+      args: ["mcp-server-fetch"],
+    },
+    git: {
+      command: "uvx",
+      args: ["mcp-server-git"],
+    },
+    sqlite: {
+      command: "uvx",
+      args: ["mcp-server-sqlite"],
     },
   },
 }
