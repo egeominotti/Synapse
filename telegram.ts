@@ -26,6 +26,7 @@ import { HistoryManager } from "./src/history"
 import { SessionStore } from "./src/session-store"
 import { RuntimeConfig } from "./src/runtime-config"
 import { logger } from "./src/logger"
+import { formatForTelegram } from "./src/formatter"
 import type { AgentCallResult, LogLevel, RuntimeConfigKey } from "./src/types"
 
 // ---------------------------------------------------------------------------
@@ -124,15 +125,15 @@ async function persistSession(chatId: number, agent: Agent): Promise<void> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Format the footer metadata line shown after each Claude response */
-function formatMeta(result: AgentCallResult): string {
+/** Build plain-text metadata line (used in footer) */
+function buildMeta(result: AgentCallResult): string {
   const secs = (result.durationMs / 1000).toFixed(1)
   const parts: string[] = [`⏱ ${secs}s`]
   if (result.tokenUsage) {
     const { inputTokens: i, outputTokens: o } = result.tokenUsage
     parts.push(`🔤 ${i} → ${o} tok`)
   }
-  return `_${parts.join("  ·  ")}_`
+  return parts.join("  ·  ")
 }
 
 /** Send "typing..." action while Claude is thinking */
@@ -148,15 +149,17 @@ async function withTyping(ctx: Context, fn: () => Promise<void>): Promise<void> 
   }
 }
 
-/** Send a long text split into Telegram-safe chunks (max 4096 chars) */
-async function sendLong(ctx: Context, text: string): Promise<void> {
-  const MAX = 4096
-  if (text.length <= MAX) {
-    await ctx.reply(text)
-    return
-  }
-  for (let i = 0; i < text.length; i += MAX) {
-    await ctx.reply(text.slice(i, i + MAX))
+/** Send Claude's response as formatted HTML with meta footer appended */
+async function sendFormatted(ctx: Context, markdown: string, result: AgentCallResult): Promise<void> {
+  const meta = buildMeta(result)
+  const { chunks, parseMode } = formatForTelegram(markdown, meta)
+  for (const chunk of chunks) {
+    try {
+      await ctx.reply(chunk, parseMode ? { parse_mode: parseMode } : {})
+    } catch {
+      // HTML parsing failed on Telegram side — retry as plain text
+      await ctx.reply(chunk)
+    }
   }
 }
 
@@ -390,8 +393,7 @@ bot.on("message:text", async (ctx) => {
         tokenUsage: result.tokenUsage,
       })
 
-      await sendLong(ctx, result.text)
-      await ctx.reply(formatMeta(result), { parse_mode: "Markdown" })
+      await sendFormatted(ctx, result.text, result)
       await persistSession(chatId, agent)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -443,8 +445,7 @@ bot.on("message:photo", async (ctx) => {
         history.addAttachment(messageId, mediaType, Buffer.from(base64, "base64"), largest.file_id)
       }
 
-      await sendLong(ctx, result.text)
-      await ctx.reply(formatMeta(result), { parse_mode: "Markdown" })
+      await sendFormatted(ctx, result.text, result)
       await persistSession(chatId, agent)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
