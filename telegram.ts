@@ -141,45 +141,50 @@ async function persistSession(chatId: number, agent: Agent): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const scheduler = new Scheduler(db, async (job) => {
-  const agent = getAgent(job.chatId)
-  const before = snapshotSandbox(agent)
-  const result = await agent.call(job.prompt)
+  // Run through ChatQueue to prevent concurrent access to the same agent/session.
+  // This also means a slow job only blocks its own chat, not all chats.
+  await chatQueue.enqueue(job.chatId, async () => {
+    const agent = getAgent(job.chatId)
+    const before = snapshotSandbox(agent)
+    const result = await agent.call(job.prompt)
 
-  const history = getHistory(job.chatId, agent)
-  await history.addMessage({
-    timestamp: new Date().toISOString(),
-    prompt: `[scheduled] ${job.prompt}`,
-    response: result.text,
-    durationMs: result.durationMs,
-    tokenUsage: result.tokenUsage,
-  })
-  await persistSession(job.chatId, agent)
+    const history = getHistory(job.chatId, agent)
+    await history.addMessage({
+      timestamp: new Date().toISOString(),
+      prompt: `[scheduled] ${job.prompt}`,
+      response: result.text,
+      durationMs: result.durationMs,
+      tokenUsage: result.tokenUsage,
+    })
+    await persistSession(job.chatId, agent)
 
-  const meta = buildMeta(result)
-  const { chunks, parseMode } = formatForTelegram(result.text, `⏰ ${meta}`)
-  for (const chunk of chunks) {
-    try {
-      await bot.api.sendMessage(job.chatId, chunk, parseMode ? { parse_mode: parseMode } : {})
-    } catch {
-      await bot.api.sendMessage(job.chatId, chunk)
+    const meta = buildMeta(result)
+    const { chunks, parseMode } = formatForTelegram(result.text, `⏰ ${meta}`)
+    for (const chunk of chunks) {
+      try {
+        await bot.api.sendMessage(job.chatId, chunk, parseMode ? { parse_mode: parseMode } : {})
+      } catch {
+        await bot.api.sendMessage(job.chatId, chunk)
+      }
     }
-  }
 
-  const after = agent.listSandboxFiles()
-  const newFiles = after.filter((f) => {
-    if (!f.path.startsWith("output/")) return false
-    const prevMtime = before.get(f.path)
-    return prevMtime === undefined || f.mtimeMs > prevMtime
-  })
-  for (const file of newFiles) {
-    try {
-      const data = readFileSync(join(agent.sandboxDir, file.path))
-      if (data.length === 0 || data.length > MAX_FILE_SIZE) continue
-      await bot.api.sendDocument(job.chatId, new InputFile(data, file.path), { caption: `📎 ${file.path}` })
-    } catch (err) {
-      logger.warn("Failed to send scheduled job file", { path: file.path, error: String(err) })
+    const after = agent.listSandboxFiles()
+    const newFiles = after.filter((f) => {
+      if (!f.path.startsWith("output/")) return false
+      const prevMtime = before.get(f.path)
+      return prevMtime === undefined || f.mtimeMs > prevMtime
+    })
+    for (const file of newFiles) {
+      try {
+        const data = readFileSync(join(agent.sandboxDir, file.path))
+        if (data.length === 0 || data.length > MAX_FILE_SIZE) continue
+        const displayName = file.path.replace(/^output\//, "")
+        await bot.api.sendDocument(job.chatId, new InputFile(data, displayName), { caption: `📎 ${displayName}` })
+      } catch (err) {
+        logger.warn("Failed to send scheduled job file", { path: file.path, error: String(err) })
+      }
     }
-  }
+  })
 })
 
 // ---------------------------------------------------------------------------
