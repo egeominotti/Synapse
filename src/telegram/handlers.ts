@@ -112,11 +112,13 @@ async function sendFormatted(ctx: Context, markdown: string, result: AgentCallRe
   const meta = buildMeta(result)
   const headerLine = header ?? formatIdentityHeader(ORCHESTRATOR_IDENTITY)
   const { chunks, parseMode } = formatForTelegram(markdown, `${headerLine}\n${meta}`)
-  for (const chunk of chunks) {
+  const replyToId = ctx.msg?.message_id
+  for (let i = 0; i < chunks.length; i++) {
+    const replyParams = i === 0 && replyToId ? { reply_parameters: { message_id: replyToId } } : {}
     try {
-      await ctx.reply(chunk, parseMode ? { parse_mode: parseMode } : {})
+      await ctx.reply(chunks[i], { ...(parseMode ? { parse_mode: parseMode } : {}), ...replyParams })
     } catch {
-      await ctx.reply(chunk)
+      await ctx.reply(chunks[i], replyParams)
     }
   }
 }
@@ -226,10 +228,12 @@ async function executeWithRetry(
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
         logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
-        await ctx.reply(`❌ Errore: ${retryMsg}`)
+        const rp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
+        await ctx.reply(`❌ Errore: ${retryMsg}`, rp)
       }
     } else {
-      await ctx.reply(`❌ Errore: ${msg}`)
+      const rp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
+      await ctx.reply(`❌ Errore: ${msg}`, rp)
     }
   }
 }
@@ -468,7 +472,8 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
         await downloadFileToSandbox(deps.botToken, ctx, voice.file_id, voiceFile, agent)
 
         const text = await transcribe(join(agent.sandboxDir, voiceFile), deps.whisperConfig!)
-        await ctx.reply(`🎙 _"${text}"_`, { parse_mode: "Markdown" })
+        const voiceRp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
+        await ctx.reply(`🎙 _"${text}"_`, { parse_mode: "Markdown", ...voiceRp })
 
         const prompt = `[vocale] ${text}`
         await executeWithRetry(ctx, ctx.chat.id, (a) => a.call(prompt), prompt, deps)
@@ -499,7 +504,8 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
         await downloadFileToSandbox(deps.botToken, ctx, audio.file_id, fileName, agent)
 
         const text = await transcribe(join(agent.sandboxDir, fileName), deps.whisperConfig!)
-        await ctx.reply(`🎙 _"${text}"_`, { parse_mode: "Markdown" })
+        const audioRp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
+        await ctx.reply(`🎙 _"${text}"_`, { parse_mode: "Markdown", ...audioRp })
 
         const prompt = caption ? `[audio] ${text}\n\n${caption}` : `[audio] ${text}`
         await executeWithRetry(ctx, ctx.chat.id, (a) => a.call(prompt), prompt, deps)
