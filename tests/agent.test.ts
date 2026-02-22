@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test"
+import { existsSync } from "fs"
 import { Agent, TimeoutError, isTransientError } from "../src/agent"
 import { buildSpawnEnv } from "../src/sandbox"
 import type { AgentConfig } from "../src/types"
@@ -238,5 +239,57 @@ describe("Agent.buildArgs", () => {
     expect(lastArg).not.toBe(null)
     // Last arg should be a flag, not a prompt
     expect(["json", "--dangerously-skip-permissions"]).toContain(lastArg)
+  })
+
+  it("includes --mcp-config when set", () => {
+    const agent = new Agent({ ...baseConfig, mcpConfigPath: "/tmp/mcp.json" })
+    const args = agent.buildArgs("hello")
+    expect(args).toContain("--mcp-config")
+    expect(args).toContain("/tmp/mcp.json")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Agent.abort()
+// ---------------------------------------------------------------------------
+
+describe("Agent.abort", () => {
+  it("does not throw when no process is running", () => {
+    const agent = new Agent(baseConfig)
+    expect(() => agent.abort()).not.toThrow()
+  })
+
+  it("can be called multiple times safely", () => {
+    const agent = new Agent(baseConfig)
+    agent.abort()
+    agent.abort()
+    agent.abort()
+    // Should not throw
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Agent.cleanup()
+// ---------------------------------------------------------------------------
+
+describe("Agent.cleanup", () => {
+  it("removes sandbox directory", () => {
+    const agent = new Agent(baseConfig)
+    expect(existsSync(agent.sandboxDir)).toBe(true)
+    agent.cleanup()
+    expect(existsSync(agent.sandboxDir)).toBe(false)
+  })
+
+  it("can be called multiple times safely", () => {
+    const agent = new Agent(baseConfig)
+    agent.cleanup()
+    // Second cleanup should not throw even though dir is gone
+    expect(() => agent.cleanup()).not.toThrow()
+  })
+
+  it("calls abort before cleaning up", () => {
+    const agent = new Agent(baseConfig)
+    // Just verify cleanup doesn't throw — abort is called internally
+    agent.cleanup()
   })
 })

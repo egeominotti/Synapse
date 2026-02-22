@@ -368,7 +368,7 @@ async function downloadFileToSandbox(
 const RE_FREETEXT_SCHEDULE =
   /^(?:(?:ogni|every)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|(?:tra|in)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|(?:alle|ogni|every|at)\s+\d{1,2}:\d{2})\b/i
 
-function parseFreetextSchedule(text: string): { scheduleExpr: string; prompt: string } | null {
+export function parseFreetextSchedule(text: string): { scheduleExpr: string; prompt: string } | null {
   const match = text.match(RE_FREETEXT_SCHEDULE)
   if (!match) return null
 

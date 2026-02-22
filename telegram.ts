@@ -23,7 +23,7 @@ import { logger } from "./src/logger"
 import { formatForTelegram } from "./src/formatter"
 import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
-import { registerHandlers, buildMeta, snapshotSandbox, MAX_FILE_SIZE, type TelegramDeps } from "./src/telegram/handlers"
+import { registerHandlers, buildMeta, MAX_FILE_SIZE, type TelegramDeps } from "./src/telegram/handlers"
 import { buildMemoryContext } from "./src/memory"
 import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
 import { dirname } from "path"
@@ -141,23 +141,14 @@ async function persistSession(chatId: number, agent: Agent): Promise<void> {
 // ---------------------------------------------------------------------------
 
 const scheduler = new Scheduler(db, async (job) => {
-  // Run through ChatQueue to prevent concurrent access to the same agent/session.
-  // This also means a slow job only blocks its own chat, not all chats.
-  await chatQueue.enqueue(job.chatId, async () => {
-    const agent = getAgent(job.chatId)
-    const before = snapshotSandbox(agent)
-    const result = await agent.call(job.prompt)
+  // Dedicated agent per job — no ChatQueue, no session sharing, zero latency impact.
+  // Each scheduled job runs in its own sandbox with its own Claude process.
+  // This means user messages are NEVER blocked by scheduled jobs.
+  const jobAgent = new Agent(agentConfig)
+  try {
+    const result = await jobAgent.call(job.prompt)
 
-    const history = getHistory(job.chatId, agent)
-    await history.addMessage({
-      timestamp: new Date().toISOString(),
-      prompt: `[scheduled] ${job.prompt}`,
-      response: result.text,
-      durationMs: result.durationMs,
-      tokenUsage: result.tokenUsage,
-    })
-    await persistSession(job.chatId, agent)
-
+    // Send response to chat
     const meta = buildMeta(result)
     const { chunks, parseMode } = formatForTelegram(result.text, `⏰ ${meta}`)
     for (const chunk of chunks) {
@@ -168,15 +159,12 @@ const scheduler = new Scheduler(db, async (job) => {
       }
     }
 
-    const after = agent.listSandboxFiles()
-    const newFiles = after.filter((f) => {
-      if (!f.path.startsWith("output/")) return false
-      const prevMtime = before.get(f.path)
-      return prevMtime === undefined || f.mtimeMs > prevMtime
-    })
-    for (const file of newFiles) {
+    // Send output files if any
+    const files = jobAgent.listSandboxFiles()
+    for (const file of files) {
+      if (!file.path.startsWith("output/")) continue
       try {
-        const data = readFileSync(join(agent.sandboxDir, file.path))
+        const data = readFileSync(join(jobAgent.sandboxDir, file.path))
         if (data.length === 0 || data.length > MAX_FILE_SIZE) continue
         const displayName = file.path.replace(/^output\//, "")
         await bot.api.sendDocument(job.chatId, new InputFile(data, displayName), { caption: `📎 ${displayName}` })
@@ -184,7 +172,15 @@ const scheduler = new Scheduler(db, async (job) => {
         logger.warn("Failed to send scheduled job file", { path: file.path, error: String(err) })
       }
     }
-  })
+
+    logger.info("Scheduled job completed", {
+      jobId: job.jobId,
+      chatId: job.chatId,
+      durationMs: result.durationMs,
+    })
+  } finally {
+    jobAgent.cleanup()
+  }
 })
 
 // ---------------------------------------------------------------------------

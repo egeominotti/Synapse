@@ -159,6 +159,27 @@ describe("RuntimeConfig validation", () => {
     expect(rc.get("log_level")).toBe("DEBUG")
   })
 
+  it("accepts timeout_ms = 5000 (minimum non-zero)", () => {
+    const config = makeConfig()
+    const rc = new RuntimeConfig(db, config)
+    const { newValue } = rc.set("timeout_ms", "5000")
+    expect(newValue).toBe("5000")
+    expect(config.timeoutMs).toBe(5000)
+  })
+
+  it("rejects timeout_ms = 3000 (between 0 and 5000)", () => {
+    const config = makeConfig()
+    const rc = new RuntimeConfig(db, config)
+    expect(() => rc.set("timeout_ms", "3000")).toThrow("Usa 0 per disabilitare")
+  })
+
+  it("accepts timeout_ms = 600000 (maximum)", () => {
+    const config = makeConfig()
+    const rc = new RuntimeConfig(db, config)
+    const { newValue } = rc.set("timeout_ms", "600000")
+    expect(newValue).toBe("600000")
+  })
+
   it("rejects unknown key", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)

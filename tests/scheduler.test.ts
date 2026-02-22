@@ -103,6 +103,65 @@ describe("parseSchedule", () => {
   it("rejects interval below minimum (30s)", () => {
     expect(() => parseSchedule("every 10s", now)).toThrow("Intervallo minimo")
   })
+
+  // --- Italian aliases ---
+
+  it('parses "in 5 minuti"', () => {
+    const spec = parseSchedule("in 5 minuti", now)
+    expect(spec.type).toBe("delay")
+    expect(spec.runAt.getTime()).toBe(now.getTime() + 5 * 60_000)
+  })
+
+  it('parses "in 10 secondi"', () => {
+    const spec = parseSchedule("in 10 secondi", now)
+    expect(spec.type).toBe("delay")
+    expect(spec.runAt.getTime()).toBe(now.getTime() + 10_000)
+  })
+
+  it('parses "in 2 ore"', () => {
+    const spec = parseSchedule("in 2 ore", now)
+    expect(spec.type).toBe("delay")
+    expect(spec.runAt.getTime()).toBe(now.getTime() + 2 * 3_600_000)
+  })
+
+  it('parses "in 1 ora"', () => {
+    const spec = parseSchedule("in 1 ora", now)
+    expect(spec.type).toBe("delay")
+    expect(spec.runAt.getTime()).toBe(now.getTime() + 3_600_000)
+  })
+
+  it('parses "ogni 1m" (interval minutes)', () => {
+    const spec = parseSchedule("ogni 1m", now)
+    expect(spec.type).toBe("recurring")
+    expect(spec.intervalMs).toBe(60_000)
+    expect(spec.runAt.getTime()).toBe(now.getTime() + 60_000)
+  })
+
+  it('parses "every 1h" (interval hours)', () => {
+    const spec = parseSchedule("every 1h", now)
+    expect(spec.type).toBe("recurring")
+    expect(spec.intervalMs).toBe(3_600_000)
+  })
+
+  it('parses "alle 14:30"', () => {
+    const spec = parseSchedule("alle 14:30", now)
+    expect(spec.type).toBe("once")
+    expect(spec.runAt.getHours()).toBe(14)
+    expect(spec.runAt.getMinutes()).toBe(30)
+  })
+
+  it("rejects zero interval", () => {
+    expect(() => parseSchedule("every 0s", now)).toThrow("maggiore di 0")
+  })
+
+  it("rejects interval of 15s (below 30s minimum)", () => {
+    expect(() => parseSchedule("every 15s", now)).toThrow("Intervallo minimo")
+  })
+
+  it("accepts exactly 30s interval", () => {
+    const spec = parseSchedule("every 30s", now)
+    expect(spec.intervalMs).toBe(30_000)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -220,5 +279,19 @@ describe("Scheduler", () => {
 
     // Different chat should still work
     expect(() => sched.createJob(2, "other chat", spec)).not.toThrow()
+  })
+
+  it("createJob stores correct interval_ms for recurring", () => {
+    const sched = new Scheduler(db, async () => {})
+    const spec: ScheduleSpec = {
+      type: "recurring",
+      runAt: new Date(Date.now() + 30_000),
+      intervalMs: 30_000,
+    }
+    sched.createJob(1, "every 30s test", spec)
+    const jobs = db.getJobsByChat(1)
+    expect(jobs).toHaveLength(1)
+    expect(jobs[0].interval_ms).toBe(30_000)
+    expect(jobs[0].schedule_type).toBe("recurring")
   })
 })

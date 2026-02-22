@@ -115,13 +115,15 @@ export class Scheduler {
   private readonly executor: JobExecutor
   private running = false
   private readonly failureCounts = new Map<number, number>()
+  /** Jobs currently being executed — prevents double-firing on next tick */
+  private readonly runningJobs = new Set<number>()
 
   constructor(db: Database, executor: JobExecutor) {
     this.db = db
     this.executor = executor
   }
 
-  /** Start the ticker. Runs every 60s. */
+  /** Start the ticker. Runs every 15s. */
   start(): void {
     if (this.running) return
     this.running = true
@@ -156,55 +158,78 @@ export class Scheduler {
     return this.db.insertJob(chatId, prompt, spec.type, spec.runAt.toISOString(), spec.intervalMs)
   }
 
-  /** Check for due jobs and execute them. */
+  /**
+   * Check for due jobs and fire them concurrently.
+   * Each job runs in its own async context — no job blocks another.
+   * Jobs already running are skipped (prevents double-firing).
+   */
   private async tick(): Promise<void> {
     const now = new Date().toISOString()
     const dueJobs = this.db.getDueJobs(now)
 
     if (dueJobs.length === 0) return
 
-    logger.debug("Scheduler tick", { dueJobs: dueJobs.length })
+    // Filter out jobs that are still running from a previous tick
+    const ready = dueJobs.filter((j) => !this.runningJobs.has(j.id))
+    if (ready.length === 0) return
 
-    for (const job of dueJobs) {
-      try {
-        await this.executor({ jobId: job.id, chatId: job.chat_id, prompt: job.prompt })
+    logger.debug("Scheduler tick", { dueJobs: dueJobs.length, ready: ready.length, running: this.runningJobs.size })
 
-        // Reset failure count on success
-        this.failureCounts.delete(job.id)
+    // Fire all ready jobs concurrently — don't block each other
+    const promises = ready.map((job) => this.executeJob(job))
+    await Promise.allSettled(promises)
+  }
 
-        // Compute next run (recurring → +interval, others → deactivate)
-        let nextRunAt: string | null = null
-        if (job.schedule_type === "recurring" && job.interval_ms) {
-          const next = new Date(new Date(job.run_at).getTime() + job.interval_ms)
-          nextRunAt = next.toISOString()
-        }
+  /** Execute a single job with tracking, failure counting, and rescheduling. */
+  private async executeJob(job: {
+    id: number
+    chat_id: number
+    prompt: string
+    schedule_type: string
+    run_at: string
+    interval_ms: number | null
+  }): Promise<void> {
+    this.runningJobs.add(job.id)
+    try {
+      await this.executor({ jobId: job.id, chatId: job.chat_id, prompt: job.prompt })
 
-        this.db.updateJobAfterRun(job.id, nextRunAt)
-        logger.info("Job executed", { jobId: job.id, chatId: job.chat_id, type: job.schedule_type })
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        const failures = (this.failureCounts.get(job.id) ?? 0) + 1
-        this.failureCounts.set(job.id, failures)
+      // Reset failure count on success
+      this.failureCounts.delete(job.id)
 
-        if (failures >= MAX_CONSECUTIVE_FAILURES) {
-          logger.error("Job deactivated after repeated failures", {
-            jobId: job.id,
-            chatId: job.chat_id,
-            failures,
-            error: msg,
-          })
-          this.db.updateJobAfterRun(job.id, null) // deactivate
-          this.failureCounts.delete(job.id)
-        } else {
-          logger.warn("Job execution failed, will retry", {
-            jobId: job.id,
-            chatId: job.chat_id,
-            failures,
-            maxFailures: MAX_CONSECUTIVE_FAILURES,
-            error: msg,
-          })
-        }
+      // Compute next run (recurring → +interval, others → deactivate)
+      let nextRunAt: string | null = null
+      if (job.schedule_type === "recurring" && job.interval_ms) {
+        const next = new Date(new Date(job.run_at).getTime() + job.interval_ms)
+        nextRunAt = next.toISOString()
       }
+
+      this.db.updateJobAfterRun(job.id, nextRunAt)
+      logger.info("Job executed", { jobId: job.id, chatId: job.chat_id, type: job.schedule_type })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const failures = (this.failureCounts.get(job.id) ?? 0) + 1
+      this.failureCounts.set(job.id, failures)
+
+      if (failures >= MAX_CONSECUTIVE_FAILURES) {
+        logger.error("Job deactivated after repeated failures", {
+          jobId: job.id,
+          chatId: job.chat_id,
+          failures,
+          error: msg,
+        })
+        this.db.updateJobAfterRun(job.id, null) // deactivate
+        this.failureCounts.delete(job.id)
+      } else {
+        logger.warn("Job execution failed, will retry", {
+          jobId: job.id,
+          chatId: job.chat_id,
+          failures,
+          maxFailures: MAX_CONSECUTIVE_FAILURES,
+          error: msg,
+        })
+      }
+    } finally {
+      this.runningJobs.delete(job.id)
     }
   }
 }
