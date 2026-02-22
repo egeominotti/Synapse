@@ -4,7 +4,7 @@
  * file delivery, persistence, and session-error auto-retry in one place.
  */
 
-import { readFileSync } from "fs"
+import { readFileSync, writeFileSync } from "fs"
 import { join } from "path"
 import { InputFile, type Bot, type Context } from "grammy"
 import { Agent } from "../agent"
@@ -232,8 +232,8 @@ async function executeWithStreaming(ctx: Context, chatId: number, prompt: string
   const execute = async (agent: Agent): Promise<void> => {
     const before = snapshotSandbox(agent)
 
-    // Send initial placeholder message
-    const sentMsg = await ctx.reply("⏳")
+    // Send initial placeholder message (Matrix style)
+    const sentMsg = await ctx.reply("<code>> decrypting...</code>", { parse_mode: "HTML" })
     const msgId = sentMsg.message_id
 
     let accumulated = ""
@@ -314,6 +314,36 @@ async function executeWithStreaming(ctx: Context, chatId: number, prompt: string
 }
 
 // ---------------------------------------------------------------------------
+// File download: save Telegram document into agent sandbox
+// ---------------------------------------------------------------------------
+
+async function downloadFileToSandbox(
+  botToken: string,
+  ctx: Context,
+  fileId: string,
+  fileName: string,
+  agent: Agent
+): Promise<string> {
+  const file = await ctx.api.getFile(fileId)
+  const url = `https://api.telegram.org/file/bot${botToken}/${file.file_path!}`
+
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`)
+
+  const buffer = Buffer.from(await res.arrayBuffer())
+  if (buffer.length > MAX_FILE_SIZE) {
+    throw new Error(
+      `File troppo grande: ${(buffer.length / 1024 / 1024).toFixed(1)} MB (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`
+    )
+  }
+
+  const dest = join(agent.sandboxDir, fileName)
+  writeFileSync(dest, buffer)
+  logger.debug("File saved to sandbox", { fileName, size: buffer.length })
+  return dest
+}
+
+// ---------------------------------------------------------------------------
 // Register message listeners
 // ---------------------------------------------------------------------------
 
@@ -351,6 +381,22 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
           }
         )
       })
+    })
+  })
+
+  bot.on("message:document", async (ctx) => {
+    const doc = ctx.message.document
+    const fileName = doc.file_name ?? "file"
+    const caption = ctx.message.caption ?? `Analizza il file ${fileName}`
+
+    await deps.chatQueue.enqueue(ctx.chat.id, async () => {
+      logger.info("Document message", { chatId: ctx.chat.id, fileId: doc.file_id, fileName, size: doc.file_size })
+
+      const agent = deps.getAgent(ctx.chat.id)
+      await downloadFileToSandbox(deps.botToken, ctx, doc.file_id, fileName, agent)
+
+      const prompt = `Ho caricato il file "${fileName}" nella directory corrente. ${caption}`
+      await executeWithStreaming(ctx, ctx.chat.id, prompt, deps)
     })
   })
 
