@@ -67,15 +67,15 @@ async function main(): Promise<void> {
     const stats = history.getStats()
     if (stats && stats.totalMessages > 0) {
       process.stdout.write(
-        `\n\x1b[90m[Sessione terminata: ${stats.totalMessages} messaggi, ` +
-          `durata totale ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
+        `\n\x1b[90m[Session ended: ${stats.totalMessages} messages, ` +
+          `total duration ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
       )
     }
 
     // Close database after reading stats
     db.close()
 
-    process.stdout.write("\x1b[1;36mArrivederci.\x1b[0m\n\n")
+    process.stdout.write("\x1b[1;36mGoodbye.\x1b[0m\n\n")
     process.exit(0)
   }
 
@@ -110,13 +110,13 @@ async function main(): Promise<void> {
   const stats = history.getStats()
   if (stats && stats.totalMessages > 0) {
     process.stdout.write(
-      `\n\x1b[90m[Sessione terminata: ${stats.totalMessages} messaggi, ` +
-        `durata totale ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
+      `\n\x1b[90m[Session ended: ${stats.totalMessages} messages, ` +
+        `total duration ${formatDuration(stats.totalDurationMs)}]\x1b[0m\n`
     )
   }
 
   db.close()
-  process.stdout.write("\x1b[1;36mArrivederci.\x1b[0m\n\n")
+  process.stdout.write("\x1b[1;36mGoodbye.\x1b[0m\n\n")
 }
 
 main().catch((err) => {

@@ -11,7 +11,7 @@ export class Spinner {
   private timer: ReturnType<typeof setInterval> | null = null
   private message: string
 
-  constructor(message = "Claude sta pensando...") {
+  constructor(message = "Claude is thinking...") {
     this.message = message
   }
 

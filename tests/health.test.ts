@@ -63,7 +63,7 @@ describe("HealthMonitor", () => {
     // Second check — DB is down
     await monitor.check()
     expect(alerts).toHaveLength(1)
-    expect(alerts[0]).toContain("DB SQLite non raggiungibile")
+    expect(alerts[0]).toContain("SQLite DB unreachable")
     expect(alerts[0]).toContain("Health Alert")
   })
 
@@ -82,13 +82,13 @@ describe("HealthMonitor", () => {
     db.close()
     await monitor.check()
     expect(alerts).toHaveLength(1)
-    expect(alerts[0]).toContain("non raggiungibile")
+    expect(alerts[0]).toContain("unreachable")
 
     // Reopen DB — recovery
     deps.db = new Database(dbPath)
     await monitor.check()
     expect(alerts).toHaveLength(2)
-    expect(alerts[1]).toContain("ripristinato")
+    expect(alerts[1]).toContain("restored")
   })
 
   it("start and stop control the loop", async () => {

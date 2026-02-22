@@ -15,13 +15,13 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
     {
       key: "system_prompt",
       type: "string",
-      description: "System prompt (persona dell'agente)",
+      description: "System prompt (agent persona)",
       defaultValue: defaults.systemPrompt ?? "",
     },
     {
       key: "timeout_ms",
       type: "number",
-      description: "Timeout per chiamata (ms, 0 = disabilitato)",
+      description: "Timeout per call (ms, 0 = disabled)",
       defaultValue: String(defaults.timeoutMs),
       min: 0,
       max: 600_000,
@@ -29,7 +29,7 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
     {
       key: "max_retries",
       type: "number",
-      description: "Tentativi massimi su errori transitori",
+      description: "Max retries on transient errors",
       defaultValue: String(defaults.maxRetries),
       min: 0,
       max: 10,
@@ -37,7 +37,7 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
     {
       key: "retry_delay_ms",
       type: "number",
-      description: "Delay iniziale retry (ms)",
+      description: "Initial retry delay (ms)",
       defaultValue: String(defaults.initialRetryDelayMs),
       min: 100,
       max: 30_000,
@@ -45,32 +45,32 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
     {
       key: "skip_permissions",
       type: "boolean",
-      description: "Skip permission prompts nel CLI",
+      description: "Skip permission prompts in CLI",
       defaultValue: String(defaults.skipPermissions),
     },
     {
       key: "log_level",
       type: "string",
-      description: "Livello di log",
+      description: "Log level",
       defaultValue: "INFO",
       enum: ["DEBUG", "INFO", "WARN", "ERROR"],
     },
     {
       key: "docker",
       type: "boolean",
-      description: "Esegui in container Docker",
+      description: "Run in Docker container",
       defaultValue: String(defaults.useDocker),
     },
     {
       key: "docker_image",
       type: "string",
-      description: "Immagine Docker",
+      description: "Docker image",
       defaultValue: defaults.dockerImage,
     },
     {
       key: "max_concurrent",
       type: "number",
-      description: "Max agenti concorrenti per chat (1 = seriale)",
+      description: "Max concurrent agents per chat (1 = serial)",
       defaultValue: String(defaults.maxConcurrentPerChat),
       min: 1,
       max: 10,
@@ -159,7 +159,7 @@ export class RuntimeConfig {
    */
   set(key: RuntimeConfigKey, rawValue: string): { oldValue: string; newValue: string } {
     const def = this.definitions.get(key)
-    if (!def) throw new Error(`Chiave sconosciuta: ${key}`)
+    if (!def) throw new Error(`Unknown key: ${key}`)
 
     const validated = this.validate(def, rawValue)
     const oldValue = this.get(key)
@@ -174,7 +174,7 @@ export class RuntimeConfig {
   /** Reset a single key to its default value */
   reset(key: RuntimeConfigKey): { oldValue: string; defaultValue: string } {
     const def = this.definitions.get(key)
-    if (!def) throw new Error(`Chiave sconosciuta: ${key}`)
+    if (!def) throw new Error(`Unknown key: ${key}`)
 
     const oldValue = this.get(key)
     this.db.deleteConfig(key)
@@ -206,24 +206,24 @@ export class RuntimeConfig {
     switch (def.type) {
       case "number": {
         const n = Number(rawValue)
-        if (!Number.isFinite(n)) throw new Error(`"${rawValue}" non e' un numero valido`)
+        if (!Number.isFinite(n)) throw new Error(`"${rawValue}" is not a valid number`)
         // timeout_ms: allow 0 (disabled) or >= 5000
         if (def.key === "timeout_ms" && n !== 0 && n < 5_000) {
-          throw new Error("Usa 0 per disabilitare, oppure un valore >= 5000 ms")
+          throw new Error("Use 0 to disable, or a value >= 5000 ms")
         }
-        if (def.min !== undefined && n < def.min) throw new Error(`Valore minimo: ${def.min}`)
-        if (def.max !== undefined && n > def.max) throw new Error(`Valore massimo: ${def.max}`)
+        if (def.min !== undefined && n < def.min) throw new Error(`Minimum value: ${def.min}`)
+        if (def.max !== undefined && n > def.max) throw new Error(`Maximum value: ${def.max}`)
         return String(n)
       }
       case "boolean": {
         const lower = rawValue.toLowerCase()
-        if (["true", "1", "yes", "si"].includes(lower)) return "true"
+        if (["true", "1", "yes"].includes(lower)) return "true"
         if (["false", "0", "no"].includes(lower)) return "false"
-        throw new Error(`"${rawValue}" non e' un booleano valido (usa: true/false, 1/0, si/no)`)
+        throw new Error(`"${rawValue}" is not a valid boolean (use: true/false, 1/0, yes/no)`)
       }
       case "string": {
         if (def.enum && !def.enum.includes(rawValue.toUpperCase())) {
-          throw new Error(`Valori ammessi: ${def.enum.join(", ")}`)
+          throw new Error(`Allowed values: ${def.enum.join(", ")}`)
         }
         if (def.enum) return rawValue.toUpperCase()
         return rawValue

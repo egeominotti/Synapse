@@ -36,7 +36,7 @@ import { dirname } from "path"
 
 const botToken = Bun.env.TELEGRAM_BOT_TOKEN
 if (!botToken) {
-  process.stderr.write("[FATAL] TELEGRAM_BOT_TOKEN non settato\n")
+  process.stderr.write("[FATAL] TELEGRAM_BOT_TOKEN not set\n")
   process.exit(1)
 }
 

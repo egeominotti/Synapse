@@ -90,7 +90,7 @@ describe("RuntimeConfig get/set", () => {
     rc.set("skip_permissions", "no")
     expect(config.skipPermissions).toBe(false)
 
-    rc.set("skip_permissions", "si")
+    rc.set("skip_permissions", "yes")
     expect(config.skipPermissions).toBe(true)
   })
 
@@ -118,13 +118,13 @@ describe("RuntimeConfig validation", () => {
   it("rejects non-numeric value for number type", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("timeout_ms", "abc")).toThrow("non e' un numero valido")
+    expect(() => rc.set("timeout_ms", "abc")).toThrow("is not a valid number")
   })
 
   it("rejects value below min (non-zero)", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("timeout_ms", "1000")).toThrow("Usa 0 per disabilitare")
+    expect(() => rc.set("timeout_ms", "1000")).toThrow("Use 0 to disable")
   })
 
   it("allows timeout_ms = 0 (disabled)", () => {
@@ -138,19 +138,19 @@ describe("RuntimeConfig validation", () => {
   it("rejects value above max", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("timeout_ms", "9999999")).toThrow("Valore massimo: 600000")
+    expect(() => rc.set("timeout_ms", "9999999")).toThrow("Maximum value: 600000")
   })
 
   it("rejects invalid boolean", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("skip_permissions", "maybe")).toThrow("non e' un booleano valido")
+    expect(() => rc.set("skip_permissions", "maybe")).toThrow("is not a valid boolean")
   })
 
   it("rejects invalid log_level", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("log_level", "TRACE")).toThrow("Valori ammessi")
+    expect(() => rc.set("log_level", "TRACE")).toThrow("Allowed values")
   })
 
   it("accepts valid log_level (case insensitive)", () => {
@@ -171,7 +171,7 @@ describe("RuntimeConfig validation", () => {
   it("rejects timeout_ms = 3000 (between 0 and 5000)", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("timeout_ms", "3000")).toThrow("Usa 0 per disabilitare")
+    expect(() => rc.set("timeout_ms", "3000")).toThrow("Use 0 to disable")
   })
 
   it("accepts timeout_ms = 600000 (maximum)", () => {
@@ -184,7 +184,7 @@ describe("RuntimeConfig validation", () => {
   it("rejects unknown key", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
-    expect(() => rc.set("unknown_key" as any, "value")).toThrow("Chiave sconosciuta")
+    expect(() => rc.set("unknown_key" as any, "value")).toThrow("Unknown key")
   })
 })
 

@@ -45,9 +45,9 @@ export type JobExecutor = (job: JobExecution) => Promise<void>
 
 /** Convert a time unit string + amount to milliseconds */
 function parseUnitToMs(unit: string, amount: number): number {
-  if (unit === "s" || unit === "sec" || unit === "secondi") return amount * MS_PER_SECOND
-  if (unit.startsWith("h") || unit === "ore" || unit === "ora") return amount * MS_PER_HOUR
-  return amount * MS_PER_MINUTE // m, min, minuti
+  if (unit === "s" || unit === "sec") return amount * MS_PER_SECOND
+  if (unit.startsWith("h")) return amount * MS_PER_HOUR
+  return amount * MS_PER_MINUTE // m, min
 }
 
 /** Convert a recurring ScheduleSpec to a cron expression. */
@@ -98,42 +98,42 @@ export function parseSchedule(expr: string, now = new Date()): ScheduleSpec {
     const test = new Cron(cronExpr, { timezone: "Europe/Rome" })
     const nextRun = test.nextRun()
     test.stop()
-    if (!nextRun) throw new Error("Espressione cron non valida o non ha esecuzioni future")
+    if (!nextRun) throw new Error("Invalid cron expression or no future executions")
     return { type: "cron", runAt: nextRun, cronExpr }
   }
 
   // "in 30s", "in 30m" or "in 2h"
-  const delayMatch = trimmed.match(/^in\s+(\d+)\s*(s|m|h|sec|min|ore|ora|minuti|secondi)$/)
+  const delayMatch = trimmed.match(/^in\s+(\d+)\s*(s|m|h|sec|min)$/)
   if (delayMatch) {
     const amount = parseInt(delayMatch[1], 10)
     const unit = delayMatch[2]
-    if (amount <= 0) throw new Error("Il valore deve essere maggiore di 0")
+    if (amount <= 0) throw new Error("Value must be greater than 0")
     const ms = parseUnitToMs(unit, amount)
     return { type: "delay", runAt: new Date(now.getTime() + ms) }
   }
 
   // "every 30s", "every 5m" or "every 2h" — interval-based recurring
-  const intervalMatch = trimmed.match(/^(every|ogni)\s+(\d+)\s*(s|m|h|sec|min|ore|ora|minuti|secondi)$/)
+  const intervalMatch = trimmed.match(/^every\s+(\d+)\s*(s|m|h|sec|min)$/)
   if (intervalMatch) {
-    const amount = parseInt(intervalMatch[2], 10)
-    const unit = intervalMatch[3]
-    if (amount <= 0) throw new Error("Il valore deve essere maggiore di 0")
+    const amount = parseInt(intervalMatch[1], 10)
+    const unit = intervalMatch[2]
+    if (amount <= 0) throw new Error("Value must be greater than 0")
     const ms = parseUnitToMs(unit, amount)
-    if (ms < MIN_INTERVAL_MS) throw new Error(`Intervallo minimo: ${MIN_INTERVAL_MS / 1000} secondi`)
+    if (ms < MIN_INTERVAL_MS) throw new Error(`Minimum interval: ${MIN_INTERVAL_MS / 1000} seconds`)
     const spec: ScheduleSpec = { type: "recurring", runAt: new Date(now.getTime() + ms), intervalMs: ms }
     spec.cronExpr = toCronExpr(spec)
     return spec
   }
 
   // "at HH:MM" or "every HH:MM"
-  const timeMatch = trimmed.match(/^(at|every|alle|ogni)\s+(\d{1,2}):(\d{2})$/)
+  const timeMatch = trimmed.match(/^(at|every)\s+(\d{1,2}):(\d{2})$/)
   if (timeMatch) {
     const mode = timeMatch[1]
     const hours = parseInt(timeMatch[2], 10)
     const minutes = parseInt(timeMatch[3], 10)
 
-    if (hours < 0 || hours > 23) throw new Error("Ora non valida (0-23)")
-    if (minutes < 0 || minutes > 59) throw new Error("Minuti non validi (0-59)")
+    if (hours < 0 || hours > 23) throw new Error("Invalid hour (0-23)")
+    if (minutes < 0 || minutes > 59) throw new Error("Invalid minutes (0-59)")
 
     const target = new Date(now)
     target.setHours(hours, minutes, 0, 0)
@@ -142,7 +142,7 @@ export function parseSchedule(expr: string, now = new Date()): ScheduleSpec {
       target.setTime(target.getTime() + MS_PER_DAY)
     }
 
-    if (mode === "every" || mode === "ogni") {
+    if (mode === "every") {
       const cronExpr = `0 ${minutes} ${hours} * * *`
       return { type: "recurring", runAt: target, intervalMs: MS_PER_DAY, cronExpr }
     }
@@ -150,8 +150,8 @@ export function parseSchedule(expr: string, now = new Date()): ScheduleSpec {
   }
 
   throw new Error(
-    'Formato non valido. Usa: "at HH:MM", "every HH:MM", "every Ns/Nm/Nh", "in Ns/Nm/Nh", "cron <expr>"\n' +
-      "Esempi: at 18:00, every 09:00, every 30s, in 30m, cron */5 * * * *"
+    'Invalid format. Use: "at HH:MM", "every HH:MM", "every Ns/Nm/Nh", "in Ns/Nm/Nh", "cron <expr>"\n' +
+      "Examples: at 18:00, every 09:00, every 30s, in 30m, cron */5 * * * *"
   )
 }
 
@@ -193,7 +193,7 @@ export class Scheduler {
   createJob(chatId: number, prompt: string, spec: ScheduleSpec): number {
     const activeCount = this.db.countActiveJobs(chatId)
     if (activeCount >= MAX_JOBS_PER_CHAT) {
-      throw new Error(`Limite raggiunto: massimo ${MAX_JOBS_PER_CHAT} job attivi per chat`)
+      throw new Error(`Limit reached: maximum ${MAX_JOBS_PER_CHAT} active jobs per chat`)
     }
 
     const cronExpr = spec.cronExpr ?? toCronExpr(spec)

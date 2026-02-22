@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/database-SQLite-003b57?logo=sqlite&logoColor=fff" alt="SQLite"/>
   <img src="https://img.shields.io/badge/bot-Telegram-26a5e4?logo=telegram&logoColor=fff" alt="Telegram"/>
   <img src="https://img.shields.io/badge/AI-Claude-d4a574?logo=anthropic&logoColor=fff" alt="Claude"/>
-  <img src="https://img.shields.io/badge/tests-314_passed-brightgreen" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-307_passed-brightgreen" alt="Tests"/>
 </p>
 
 ---
@@ -25,19 +25,18 @@
 - **Concurrent agents**: Master/worker pool per chat with configurable concurrency (1–10)
 - **Vision**: Photo and document analysis via base64 streaming
 - **Voice-to-text**: Groq API (primary, <1 sec) + local whisper-cli fallback
-- **Job scheduler**: Cron, interval, delay, and one-shot scheduled prompts with Italian natural language
+- **Job scheduler**: Cron, interval, delay, and one-shot scheduled prompts
 - **Sandbox isolation**: Each agent runs in an isolated `/tmp/neo-agent-*` directory with safety rules
 - **Health monitoring**: DB, Groq, whisper, memory checks every 30s with Telegram alerts
 - **Runtime config**: All agent parameters configurable live via `/config` (admin only, persisted)
 - **MCP servers**: Memory, sequential thinking, filesystem, fetch, git, SQLite
 - **Matrix-themed identities**: Agents get unique names (Neo, Morpheus, Trinity...) + color emojis
-- **314 tests** across 20 files with pre-commit hooks and CI pipeline
+- **307 tests** across 20 files with pre-commit hooks and CI pipeline
 
 ## Requirements
 
 - [Bun](https://bun.sh) v1.0+
 - [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and available in PATH
-- A `CLAUDE_CODE_OAUTH_TOKEN` (OAuth token for Claude CLI)
 
 ### Optional
 
@@ -47,11 +46,53 @@
 
 ## Quick Start
 
+### 1. Install dependencies
+
 ```bash
 bun install
-cp .env.example .env   # edit with your tokens
-bun run index.ts       # REPL
-bun run run.ts         # Telegram bot
+```
+
+### 2. Get your Claude Code OAuth token
+
+Neo uses the Claude Code CLI under the hood. You need an OAuth token to authenticate:
+
+```bash
+# If you haven't installed Claude Code yet:
+npm install -g @anthropic-ai/claude-code
+
+# Generate your OAuth token:
+claude setup-token
+```
+
+This will open a browser for authentication and output a token. Copy it — you'll need it in the next step.
+
+### 3. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your token:
+
+```env
+CLAUDE_CODE_OAUTH_TOKEN=<your-token-from-step-2>
+
+# For Telegram bot (optional):
+TELEGRAM_BOT_TOKEN=<token-from-@BotFather>
+TELEGRAM_ADMIN_ID=<your-telegram-chat-id>
+
+# For voice transcription (optional):
+GROQ_API_KEY=<your-groq-api-key>
+```
+
+### 4. Run
+
+```bash
+# Interactive REPL
+bun run index.ts
+
+# Telegram bot
+bun run run.ts
 ```
 
 ## Configuration
@@ -124,8 +165,6 @@ Modify agent parameters at runtime via Telegram — changes are validated, persi
 /schedule in 2h Remind me              # Delay (one-shot)
 /schedule cron 0 */6 * * * Every 6h    # Raw cron expression
 ```
-
-Italian aliases supported: `alle`, `ogni`, `ora`, `ore`, `minuti`, `secondi`.
 
 #### Voice Transcription
 
@@ -218,7 +257,7 @@ src/
   telegram/
     handlers.ts         → Message handlers (text, photo, document, voice, edited)
     commands.ts         → Bot commands (/start, /help, /reset, /stats, /config, etc.)
-tests/                  → 314 tests across 20 files
+tests/                  → 307 tests across 20 files
 ```
 
 ### Database Schema
@@ -237,7 +276,7 @@ scheduled_jobs    (id PK, chat_id, prompt, schedule_type, cron_expr, run_at, int
 ## Development
 
 ```bash
-bun test              # 314 tests across 20 files
+bun test              # 307 tests across 20 files
 bun run typecheck     # TypeScript strict check
 bun run lint          # ESLint + typescript-eslint
 bun run format        # Prettier auto-format

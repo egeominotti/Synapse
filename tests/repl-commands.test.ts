@@ -126,7 +126,7 @@ describe("printHistory", () => {
     printHistory(mockHistory as any, (t) => {
       output += t
     })
-    expect(output).toContain("Nessun messaggio")
+    expect(output).toContain("No messages")
   })
 
   it("shows messages when present", () => {
@@ -161,7 +161,7 @@ describe("printStats", () => {
     printStats(mockHistory as any, (t) => {
       output += t
     })
-    expect(output).toContain("Nessuna statistica")
+    expect(output).toContain("No statistics")
   })
 
   it("shows stats when present", () => {
@@ -178,6 +178,6 @@ describe("printStats", () => {
       output += t
     })
     expect(output).toContain("10")
-    expect(output).toContain("Token")
+    expect(output).toContain("token")
   })
 })

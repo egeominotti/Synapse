@@ -13,34 +13,34 @@ import type { TelegramDeps } from "./handlers"
 export function registerCommands(bot: Bot, deps: TelegramDeps): void {
   bot.command("start", async (ctx) => {
     await ctx.reply(
-      "👋 Ciao! Sono il tuo agente Claude.\n\n" +
-        "Scrivimi qualcosa o mandami una foto.\n\n" +
-        "/help — comandi disponibili\n" +
-        "/reset — nuova conversazione\n" +
-        "/stats — statistiche sessione"
+      "👋 Hello! I'm your Claude agent.\n\n" +
+        "Write me something or send me a photo.\n\n" +
+        "/help — available commands\n" +
+        "/reset — new conversation\n" +
+        "/stats — session statistics"
     )
   })
 
   bot.command("help", async (ctx) => {
     const lines = [
-      "📋 *Comandi disponibili:*\n",
-      "/start — messaggio di benvenuto",
-      "/reset — resetta la conversazione",
-      "/stats — statistiche sessione corrente",
-      "/export — esporta conversazione come file",
-      "/schedule — programma un job schedulato",
-      "/jobs — lista job attivi",
-      "/ping — stato del bot",
+      "📋 *Available commands:*\n",
+      "/start — welcome message",
+      "/reset — reset the conversation",
+      "/stats — current session statistics",
+      "/export — export conversation as file",
+      "/schedule — schedule a job",
+      "/jobs — list active jobs",
+      "/ping — bot status",
     ]
     if (deps.isAdmin(ctx.chat.id)) {
-      lines.push("/prompt — cambia il comportamento del bot (admin)")
-      lines.push("/config — configurazione runtime (admin)")
+      lines.push("/prompt — change bot behavior (admin)")
+      lines.push("/config — runtime configuration (admin)")
     }
     lines.push(
       "",
-      "💬 Scrivi qualsiasi messaggio per parlare con Claude.",
-      "📷 Manda una foto (con o senza didascalia) per analisi visiva.",
-      "✏️ Modifica un messaggio per reinviarlo a Claude."
+      "💬 Write any message to talk with Claude.",
+      "📷 Send a photo (with or without caption) for visual analysis.",
+      "✏️ Edit a message to resend it to Claude."
     )
     await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
   })
@@ -53,7 +53,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     deps.histories.delete(chatId)
     await deps.store.delete(chatId)
     logger.info("Session reset", { chatId })
-    await ctx.reply("🔄 Sessione resettata. Puoi iniziare una nuova conversazione.")
+    await ctx.reply("🔄 Session reset. You can start a new conversation.")
   })
 
   bot.command("stats", async (ctx) => {
@@ -63,9 +63,9 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const sid = pool?.getPrimary().getSessionId() ?? savedSid
 
     const lines = [
-      `📊 *Sessione corrente:*\n`,
-      `Session ID: \`${sid ? sid.slice(0, 16) + "..." : "nessuna"}\``,
-      `Persistenza: ${savedSid ? "✅ salvata in DB" : "⏳ non ancora salvata"}`,
+      `📊 *Current session:*\n`,
+      `Session ID: \`${sid ? sid.slice(0, 16) + "..." : "none"}\``,
+      `Persistence: ${savedSid ? "✅ saved in DB" : "⏳ not yet saved"}`,
     ]
 
     if (sid) {
@@ -74,16 +74,16 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
         const avgMs = Math.round(stats.totalDurationMs / stats.totalMessages)
         const totalTok = stats.totalInputTokens + stats.totalOutputTokens
         lines.push("")
-        lines.push(`Messaggi: *${stats.totalMessages}*`)
-        lines.push(`Durata media: *${(avgMs / 1000).toFixed(1)}s*`)
+        lines.push(`Messages: *${stats.totalMessages}*`)
+        lines.push(`Average duration: *${(avgMs / 1000).toFixed(1)}s*`)
         if (totalTok > 0) {
           lines.push(
-            `Token: *${totalTok.toLocaleString("it-IT")}* (${stats.totalInputTokens.toLocaleString("it-IT")} in / ${stats.totalOutputTokens.toLocaleString("it-IT")} out)`
+            `Tokens: *${totalTok.toLocaleString("en-US")}* (${stats.totalInputTokens.toLocaleString("en-US")} in / ${stats.totalOutputTokens.toLocaleString("en-US")} out)`
           )
         }
         const attachments = deps.db.getAttachmentsBySession(sid)
         if (attachments.length > 0) {
-          lines.push(`Foto: *${attachments.length}*`)
+          lines.push(`Photos: *${attachments.length}*`)
         }
       }
     }
@@ -94,13 +94,13 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       const avgMs = Math.round(global.totalDurationMs / global.totalMessages)
       const totalTok = global.totalInputTokens + global.totalOutputTokens
       lines.push("")
-      lines.push(`📈 *Storico totale:*\n`)
-      lines.push(`Sessioni: *${global.totalSessions}*`)
-      lines.push(`Messaggi: *${global.totalMessages}*`)
-      lines.push(`Durata media: *${(avgMs / 1000).toFixed(1)}s*`)
+      lines.push(`📈 *Total history:*\n`)
+      lines.push(`Sessions: *${global.totalSessions}*`)
+      lines.push(`Messages: *${global.totalMessages}*`)
+      lines.push(`Average duration: *${(avgMs / 1000).toFixed(1)}s*`)
       if (totalTok > 0) {
         lines.push(
-          `Token: *${totalTok.toLocaleString("it-IT")}* (${global.totalInputTokens.toLocaleString("it-IT")} in / ${global.totalOutputTokens.toLocaleString("it-IT")} out)`
+          `Tokens: *${totalTok.toLocaleString("en-US")}* (${global.totalInputTokens.toLocaleString("en-US")} in / ${global.totalOutputTokens.toLocaleString("en-US")} out)`
         )
       }
     }
@@ -119,10 +119,10 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const lines = [
       "🏓 *Pong!*\n",
       `Uptime: *${uptime}*`,
-      `Agenti attivi: *${deps.agentPools.size}*`,
-      `Sessioni Telegram: *${deps.store.size}*`,
-      `Coda messaggi: *${deps.chatQueue.size}*`,
-      `DB: ✅ operativo`,
+      `Active agents: *${deps.agentPools.size}*`,
+      `Telegram sessions: *${deps.store.size}*`,
+      `Message queue: *${deps.chatQueue.size}*`,
+      `DB: ✅ operational`,
     ]
 
     await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
@@ -139,20 +139,20 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const sid = pool?.getPrimary().getSessionId() ?? savedSid
 
     if (!sid) {
-      await ctx.reply("📭 Nessuna sessione da esportare. Inizia una conversazione prima.")
+      await ctx.reply("📭 No session to export. Start a conversation first.")
       return
     }
 
     const messages = deps.db.getMessages(sid)
     if (messages.length === 0) {
-      await ctx.reply("📭 Sessione vuota, niente da esportare.")
+      await ctx.reply("📭 Empty session, nothing to export.")
       return
     }
 
-    const lines: string[] = [`# Sessione ${sid.slice(0, 16)}`, ""]
+    const lines: string[] = [`# Session ${sid.slice(0, 16)}`, ""]
     for (const msg of messages) {
-      const date = new Date(msg.timestamp).toLocaleString("it-IT", { timeZone: "Europe/Rome" })
-      lines.push(`## 👤 Utente — ${date}`)
+      const date = new Date(msg.timestamp).toLocaleString("en-US", { timeZone: "Europe/Rome" })
+      lines.push(`## 👤 User — ${date}`)
       lines.push("", msg.prompt, "")
       lines.push(`## 🤖 Claude — ${(msg.duration_ms / 1000).toFixed(1)}s`)
       lines.push("", msg.response, "")
@@ -160,11 +160,11 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     }
 
     const content = lines.join("\n")
-    const filename = `sessione-${sid.slice(0, 8)}.md`
+    const filename = `session-${sid.slice(0, 8)}.md`
     const buffer = Buffer.from(content)
 
     await ctx.replyWithDocument(new InputFile(buffer, filename), {
-      caption: `📄 ${messages.length} messaggi esportati`,
+      caption: `📄 ${messages.length} messages exported`,
     })
   })
 
@@ -178,19 +178,19 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
 
     if (!args) {
       await ctx.reply(
-        "⏰ *Uso:*\n\n" +
-          "`/schedule at 18:00 <prompt>` — una volta\n" +
-          "`/schedule every 09:00 <prompt>` — ogni giorno\n" +
-          "`/schedule every 30s <prompt>` — ogni 30 secondi\n" +
-          "`/schedule every 5m <prompt>` — ogni 5 minuti\n" +
-          "`/schedule in 30m <prompt>` — dopo un delay\n" +
-          "`/schedule cron */5 * * * * <prompt>` — cron raw\n\n" +
-          "Esempi:\n" +
-          "`/schedule at 18:00 Ricordami di chiamare Mario`\n" +
-          "`/schedule every 09:00 Buongiorno! Programmi per oggi?`\n" +
-          "`/schedule every 1m Controlla lo stato del sistema`\n" +
-          "`/schedule in 2h Controlla lo stato del deploy`\n" +
-          "`/schedule cron 0 0 9 * * * Buongiorno!`",
+        "⏰ *Usage:*\n\n" +
+          "`/schedule at 18:00 <prompt>` — once\n" +
+          "`/schedule every 09:00 <prompt>` — every day\n" +
+          "`/schedule every 30s <prompt>` — every 30 seconds\n" +
+          "`/schedule every 5m <prompt>` — every 5 minutes\n" +
+          "`/schedule in 30m <prompt>` — after a delay\n" +
+          "`/schedule cron */5 * * * * <prompt>` — raw cron\n\n" +
+          "Examples:\n" +
+          "`/schedule at 18:00 Remind me to call Mario`\n" +
+          "`/schedule every 09:00 Good morning! Plans for today?`\n" +
+          "`/schedule every 1m Check system status`\n" +
+          "`/schedule in 2h Check deploy status`\n" +
+          "`/schedule cron 0 0 9 * * * Good morning!`",
         { parse_mode: "Markdown" }
       )
       return
@@ -200,7 +200,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     // Cron can have 5 or 6 fields, so we need a special parser
     const cronMatch = args.match(/^cron\s+(.+)$/i)
     const timeExprMatch = args.match(
-      /^((?:at|every|alle|ogni)\s+\d{1,2}:\d{2}|(?:every|ogni)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|in\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi))\s+(.+)$/i
+      /^((?:at|every)\s+\d{1,2}:\d{2}|every\s+\d+\s*(?:s|m|h|sec|min)|in\s+\d+\s*(?:s|m|h|sec|min))\s+(.+)$/i
     )
 
     let scheduleExpr: string
@@ -230,7 +230,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       // @ts-expect-error — scheduleExpr/prompt set in loop
       if (!scheduleExpr || !prompt) {
         await ctx.reply(
-          "❌ Formato cron non valido.\n\nUsa: `/schedule cron <5-6 campi> <prompt>`\nEsempio: `/schedule cron 0 0 9 * * * Buongiorno!`",
+          "❌ Invalid cron format.\n\nUsage: `/schedule cron <5-6 fields> <prompt>`\nExample: `/schedule cron 0 0 9 * * * Good morning!`",
           { parse_mode: "Markdown" }
         )
         return
@@ -240,7 +240,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       prompt = timeExprMatch[2]
     } else {
       await ctx.reply(
-        "❌ Formato non valido.\n\nUsa: `/schedule at 18:00 <prompt>`, `/schedule every 30s <prompt>`, `/schedule in 5m <prompt>`, `/schedule cron <expr> <prompt>`",
+        "❌ Invalid format.\n\nUsage: `/schedule at 18:00 <prompt>`, `/schedule every 30s <prompt>`, `/schedule in 5m <prompt>`, `/schedule cron <expr> <prompt>`",
         { parse_mode: "Markdown" }
       )
       return
@@ -250,22 +250,22 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       const spec = parseSchedule(scheduleExpr)
       const jobId = deps.scheduler.createJob(ctx.chat.id, prompt, spec)
       const identity = generateIdentity(jobId)
-      const runAtStr = spec.runAt.toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+      const runAtStr = spec.runAt.toLocaleString("en-US", { timeZone: "Europe/Rome" })
       const typeLabel =
         spec.type === "cron"
           ? "⚙️ Cron"
           : spec.type === "recurring"
-            ? "🔄 Ricorrente"
+            ? "🔄 Recurring"
             : spec.type === "delay"
               ? "⏳ Delay"
-              : "📌 Una volta"
+              : "📌 Once"
       const cronInfo = spec.cronExpr ? `\nCron: \`${spec.cronExpr}\`` : ""
 
       await ctx.reply(
-        `✅ Job #${jobId} creato\n\n` +
+        `✅ Job #${jobId} created\n\n` +
           `${identity.emoji} *${identity.name}* · ${identity.code}\n` +
           `${typeLabel}${cronInfo}\n` +
-          `Prossima esecuzione: *${runAtStr}*\n` +
+          `Next execution: *${runAtStr}*\n` +
           `Prompt: _${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}_`,
         { parse_mode: "Markdown" }
       )
@@ -279,14 +279,14 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const jobs = deps.db.getJobsByChat(ctx.chat.id)
 
     if (jobs.length === 0) {
-      await ctx.reply("📭 Nessun job attivo. Usa /schedule per crearne uno.")
+      await ctx.reply("📭 No active jobs. Use /schedule to create one.")
       return
     }
 
-    const lines = [`⏰ *Job attivi (${jobs.length}):*\n`]
+    const lines = [`⏰ *Active jobs (${jobs.length}):*\n`]
     for (const job of jobs) {
       const identity = generateIdentity(job.id)
-      const runAt = new Date(job.run_at).toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+      const runAt = new Date(job.run_at).toLocaleString("en-US", { timeZone: "Europe/Rome" })
       const typeEmoji =
         job.schedule_type === "cron"
           ? "⚙️"
@@ -302,7 +302,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       lines.push(`  _${promptPreview}_\n`)
     }
 
-    lines.push("Usa `/job delete <id>` o `/job clear` per eliminare.")
+    lines.push("Use `/job delete <id>` or `/job clear` to delete.")
     await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
   })
 
@@ -314,16 +314,16 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     if (args === "clear") {
       const count = deps.scheduler.cancelAllJobs(ctx.chat.id)
       if (count > 0) {
-        await ctx.reply(`✅ ${count} job eliminati e Cron fermati.`)
+        await ctx.reply(`✅ ${count} jobs deleted and Cron stopped.`)
       } else {
-        await ctx.reply("📭 Nessun job da eliminare.")
+        await ctx.reply("📭 No jobs to delete.")
       }
       return
     }
 
     const deleteMatch = args.match(/^delete\s+(\d+)$/)
     if (!deleteMatch) {
-      await ctx.reply("Uso:\n`/job delete <id>` — elimina un job\n`/job clear` — elimina tutti i job", {
+      await ctx.reply("Usage:\n`/job delete <id>` — delete a job\n`/job clear` — delete all jobs", {
         parse_mode: "Markdown",
       })
       return
@@ -333,9 +333,9 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const deleted = deps.scheduler.cancelJob(jobId, ctx.chat.id)
 
     if (deleted) {
-      await ctx.reply(`✅ Job #${jobId} eliminato e Cron fermato.`)
+      await ctx.reply(`✅ Job #${jobId} deleted and Cron stopped.`)
     } else {
-      await ctx.reply(`❌ Job #${jobId} non trovato o non appartiene a questa chat.`)
+      await ctx.reply(`❌ Job #${jobId} not found or does not belong to this chat.`)
     }
   })
 
@@ -347,7 +347,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const chatId = ctx.chat.id
 
     if (!deps.isAdmin(chatId)) {
-      await ctx.reply("🔒 Non autorizzato. Solo l'admin puo' cambiare il comportamento.")
+      await ctx.reply("🔒 Unauthorized. Only admin can change behavior.")
       return
     }
 
@@ -359,11 +359,11 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     if (!args) {
       const current = rc.get("system_prompt")
       if (current) {
-        await ctx.reply(`🧠 *Prompt attuale:*\n\n_${current}_\n\n_Usa /prompt reset per tornare al default_`, {
+        await ctx.reply(`🧠 *Current prompt:*\n\n_${current}_\n\n_Use /prompt reset to restore default_`, {
           parse_mode: "Markdown",
         })
       } else {
-        await ctx.reply("🧠 Nessun prompt personalizzato impostato.\n\nUsa `/prompt <testo>` per impostarne uno.", {
+        await ctx.reply("🧠 No custom prompt set.\n\nUse `/prompt <text>` to set one.", {
           parse_mode: "Markdown",
         })
       }
@@ -381,7 +381,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       deps.histories.delete(chatId)
       await deps.store.delete(chatId)
 
-      await ctx.reply("✅ Prompt rimosso e sessione resettata.\n\nIl bot torna al comportamento predefinito.")
+      await ctx.reply("✅ Prompt removed and session reset.\n\nThe bot returns to default behavior.")
       return
     }
 
@@ -396,13 +396,13 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       deps.histories.delete(chatId)
       await deps.store.delete(chatId)
 
-      const changed = oldValue ? `\n\n_Precedente: ${oldValue.slice(0, 100)}${oldValue.length > 100 ? "..." : ""}_` : ""
-      await ctx.reply(`✅ Prompt aggiornato e sessione resettata.${changed}\n\n🧠 _${args}_`, {
+      const changed = oldValue ? `\n\n_Previous: ${oldValue.slice(0, 100)}${oldValue.length > 100 ? "..." : ""}_` : ""
+      await ctx.reply(`✅ Prompt updated and session reset.${changed}\n\n🧠 _${args}_`, {
         parse_mode: "Markdown",
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await ctx.reply(`❌ Errore: ${msg}`)
+      await ctx.reply(`❌ Error: ${msg}`)
     }
   })
 
@@ -414,7 +414,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const chatId = ctx.chat.id
 
     if (!deps.isAdmin(chatId)) {
-      await ctx.reply("🔒 Non autorizzato. Solo l'admin puo' configurare il bot.")
+      await ctx.reply("🔒 Unauthorized. Only admin can configure the bot.")
       return
     }
 
@@ -424,21 +424,21 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
 
     if (!args) {
       const all = rc.getAll()
-      const lines = ["⚙️ *Configurazione corrente:*\n"]
+      const lines = ["⚙️ *Current configuration:*\n"]
       for (const item of all) {
         const modified = item.value !== item.defaultValue ? " ✏️" : ""
         lines.push(`\`${item.key}\` = \`${item.value || '""'}\`${modified}`)
         lines.push(`  _${item.description}_\n`)
       }
-      lines.push("_Usa /config <key> <value> per modificare_")
-      lines.push("_Usa /config reset per ripristinare i default_")
+      lines.push("_Use /config <key> <value> to modify_")
+      lines.push("_Use /config reset to restore defaults_")
       await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
       return
     }
 
     if (args === "reset") {
       rc.resetAll()
-      await ctx.reply("✅ Configurazione ripristinata ai default.")
+      await ctx.reply("✅ Configuration restored to defaults.")
       return
     }
 
@@ -449,11 +449,11 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
           .getAllDefinitions()
           .map((d) => d.key)
           .join(", ")
-        await ctx.reply(`❌ Chiave sconosciuta: \`${key}\`\n\nChiavi valide: ${keys}`, { parse_mode: "Markdown" })
+        await ctx.reply(`❌ Unknown key: \`${key}\`\n\nValid keys: ${keys}`, { parse_mode: "Markdown" })
         return
       }
       const { oldValue, defaultValue } = rc.reset(key as RuntimeConfigKey)
-      await ctx.reply(`✅ \`${key}\` ripristinato\n\n\`${oldValue}\` → \`${defaultValue}\``, {
+      await ctx.reply(`✅ \`${key}\` restored\n\n\`${oldValue}\` → \`${defaultValue}\``, {
         parse_mode: "Markdown",
       })
       return
@@ -467,7 +467,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
         .getAllDefinitions()
         .map((d) => d.key)
         .join(", ")
-      await ctx.reply(`❌ Chiave sconosciuta: \`${key}\`\n\nChiavi valide: ${keys}`, { parse_mode: "Markdown" })
+      await ctx.reply(`❌ Unknown key: \`${key}\`\n\nValid keys: ${keys}`, { parse_mode: "Markdown" })
       return
     }
 
@@ -477,14 +477,14 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       const modified = current !== def.defaultValue ? " ✏️" : ""
       const lines = [
         `⚙️ \`${key}\`${modified}\n`,
-        `Valore: \`${current || '""'}\``,
+        `Value: \`${current || '""'}\``,
         `Default: \`${def.defaultValue || '""'}\``,
-        `Tipo: ${def.type}`,
+        `Type: ${def.type}`,
         `_${def.description}_`,
       ]
       if (def.min !== undefined) lines.push(`Min: ${def.min}`)
       if (def.max !== undefined) lines.push(`Max: ${def.max}`)
-      if (def.enum) lines.push(`Valori: ${def.enum.join(", ")}`)
+      if (def.enum) lines.push(`Values: ${def.enum.join(", ")}`)
       await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
       return
     }
@@ -492,12 +492,12 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const value = parts.slice(1).join(" ")
     try {
       const { oldValue, newValue } = rc.set(key as RuntimeConfigKey, value)
-      await ctx.reply(`✅ \`${key}\` aggiornato\n\n\`${oldValue || '""'}\` → \`${newValue || '""'}\``, {
+      await ctx.reply(`✅ \`${key}\` updated\n\n\`${oldValue || '""'}\` → \`${newValue || '""'}\``, {
         parse_mode: "Markdown",
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await ctx.reply(`❌ Errore: ${msg}`, { parse_mode: "Markdown" })
+      await ctx.reply(`❌ Error: ${msg}`, { parse_mode: "Markdown" })
     }
   })
 }

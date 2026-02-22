@@ -87,7 +87,7 @@ export class Repl {
     let isMultiline = false
 
     while (true) {
-      this.write(isMultiline ? `${DIM}... ${RESET}` : `${YELLOW}Tu: ${RESET}`)
+      this.write(isMultiline ? `${DIM}... ${RESET}` : `${YELLOW}You: ${RESET}`)
 
       const line = await this.readLine()
       if (line === null) return lines.length > 0 ? lines.join("\n") : null
@@ -131,7 +131,7 @@ export class Repl {
 
     const command = this.commands.get(name)
     if (!command) {
-      this.write(`${RED}Comando sconosciuto: /${name}. Usa /help per la lista comandi.${RESET}\n\n`)
+      this.write(`${RED}Unknown command: /${name}. Use /help for the command list.${RESET}\n\n`)
       return
     }
 
@@ -171,7 +171,7 @@ export class Repl {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
       logger.error("Agent call failed", { error: errorMsg })
-      this.write(`${RED}Errore: ${errorMsg}${RESET}\n\n`)
+      this.write(`${RED}Error: ${errorMsg}${RESET}\n\n`)
     } finally {
       spinner.stop()
       this.activeSpinner = null
@@ -188,7 +188,7 @@ export class Repl {
     const commands: SlashCommand[] = [
       {
         name: "help",
-        description: "Mostra i comandi disponibili",
+        description: "Show available commands",
         handler: async () => {
           printHelp(this.commands, w)
           return true
@@ -196,30 +196,30 @@ export class Repl {
       },
       {
         name: "image",
-        description: "Invia un'immagine a Claude: /image <percorso> [prompt]",
+        description: "Send an image to Claude: /image <path> [prompt]",
         handler: async (args) => {
           const trimmed = args.trim()
           const parsed = parseImageArgs(trimmed)
           if (!parsed) {
             if (!trimmed) {
-              w(`${RED}Uso: /image <percorso_file> [prompt]${RESET}\n`)
-              w(`${DIM}Formati supportati: jpg, jpeg, png, gif, webp${RESET}\n\n`)
+              w(`${RED}Usage: /image <file_path> [prompt]${RESET}\n`)
+              w(`${DIM}Supported formats: jpg, jpeg, png, gif, webp${RESET}\n\n`)
             } else {
               const imagePath = resolve(trimmed.split(/\s+/)[0])
-              w(`${RED}File non trovato: ${imagePath}${RESET}\n\n`)
+              w(`${RED}File not found: ${imagePath}${RESET}\n\n`)
             }
             return true
           }
-          w(`${DIM}Caricamento immagine: ${parsed.imagePath}${RESET}\n`)
-          const label = `Analisi immagine: ${parsed.imagePath}...`
-          const display = `[immagine: ${parsed.imagePath}] ${parsed.prompt}`.trim()
+          w(`${DIM}Loading image: ${parsed.imagePath}${RESET}\n`)
+          const label = `Image analysis: ${parsed.imagePath}...`
+          const display = `[image: ${parsed.imagePath}] ${parsed.prompt}`.trim()
           await this.executePrompt(display, (agent) => agent.callWithImage(parsed.imagePath, parsed.prompt), label)
           return true
         },
       },
       {
         name: "history",
-        description: "Mostra gli ultimi 5 messaggi della sessione",
+        description: "Show last 5 messages of the session",
         handler: async () => {
           printHistory(this.history, w)
           return true
@@ -227,7 +227,7 @@ export class Repl {
       },
       {
         name: "sessions",
-        description: "Lista le sessioni salvate",
+        description: "List saved sessions",
         handler: async () => {
           await printSessions(this.history, w)
           return true
@@ -235,7 +235,7 @@ export class Repl {
       },
       {
         name: "load",
-        description: "Carica una sessione precedente: /load <session_id>",
+        description: "Load a previous session: /load <session_id>",
         handler: async (args) => {
           await loadSession(args.trim(), this.history, (id) => this.agent.setSessionId(id), w)
           return true
@@ -243,7 +243,7 @@ export class Repl {
       },
       {
         name: "stats",
-        description: "Mostra le statistiche della sessione corrente",
+        description: "Show current session statistics",
         handler: async () => {
           printStats(this.history, w)
           return true
@@ -251,17 +251,17 @@ export class Repl {
       },
       {
         name: "reset",
-        description: "Resetta la sessione corrente",
+        description: "Reset current session",
         handler: async () => {
           this.agent.setSessionId(null)
           this.history.reset()
-          w(`${DIM}[sessione resettata]${RESET}\n\n`)
+          w(`${DIM}[session reset]${RESET}\n\n`)
           return true
         },
       },
       {
         name: "exit",
-        description: "Esci dall'agente",
+        description: "Exit the agent",
         handler: async () => {
           this.running = false
           return true

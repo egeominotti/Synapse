@@ -8,11 +8,11 @@ import { parseFreetextSchedule } from "../src/telegram/handlers"
 describe("parseFreetextSchedule", () => {
   // --- Valid patterns ---
 
-  it('detects "ogni 30s dimmi ciao"', () => {
-    const result = parseFreetextSchedule("ogni 30s dimmi ciao")
+  it('detects "every 30s say hello"', () => {
+    const result = parseFreetextSchedule("every 30s say hello")
     expect(result).not.toBeNull()
-    expect(result!.scheduleExpr).toBe("ogni 30s")
-    expect(result!.prompt).toBe("dimmi ciao")
+    expect(result!.scheduleExpr).toBe("every 30s")
+    expect(result!.prompt).toBe("say hello")
   })
 
   it('detects "every 5m check status"', () => {
@@ -29,11 +29,11 @@ describe("parseFreetextSchedule", () => {
     expect(result!.prompt).toBe("send report")
   })
 
-  it('normalizes "tra 10m ricordami di chiamare" → "in 10m"', () => {
-    const result = parseFreetextSchedule("tra 10m ricordami di chiamare")
+  it('detects "in 10m remind me to call"', () => {
+    const result = parseFreetextSchedule("in 10m remind me to call")
     expect(result).not.toBeNull()
     expect(result!.scheduleExpr).toBe("in 10m")
-    expect(result!.prompt).toBe("ricordami di chiamare")
+    expect(result!.prompt).toBe("remind me to call")
   })
 
   it('detects "in 30m check the server"', () => {
@@ -50,11 +50,11 @@ describe("parseFreetextSchedule", () => {
     expect(result!.prompt).toBe("ping")
   })
 
-  it('detects "alle 18:00 ricordami la riunione"', () => {
-    const result = parseFreetextSchedule("alle 18:00 ricordami la riunione")
+  it('detects "at 18:00 remind me about the meeting"', () => {
+    const result = parseFreetextSchedule("at 18:00 remind me about the meeting")
     expect(result).not.toBeNull()
-    expect(result!.scheduleExpr).toBe("alle 18:00")
-    expect(result!.prompt).toBe("ricordami la riunione")
+    expect(result!.scheduleExpr).toBe("at 18:00")
+    expect(result!.prompt).toBe("remind me about the meeting")
   })
 
   it('detects "at 09:30 good morning"', () => {
@@ -64,27 +64,27 @@ describe("parseFreetextSchedule", () => {
     expect(result!.prompt).toBe("good morning")
   })
 
-  it('detects "ogni 18:00 dammi il report"', () => {
-    const result = parseFreetextSchedule("ogni 18:00 dammi il report")
+  it('detects "every 18:00 give me the report"', () => {
+    const result = parseFreetextSchedule("every 18:00 give me the report")
     expect(result).not.toBeNull()
-    expect(result!.scheduleExpr).toBe("ogni 18:00")
-    expect(result!.prompt).toBe("dammi il report")
+    expect(result!.scheduleExpr).toBe("every 18:00")
+    expect(result!.prompt).toBe("give me the report")
   })
 
   it("preserves full prompt after schedule expression", () => {
-    const result = parseFreetextSchedule("every 1h dimmi che ore sono e il meteo attuale a Roma")
+    const result = parseFreetextSchedule("every 1h tell me the time and the current weather in Rome")
     expect(result).not.toBeNull()
-    expect(result!.prompt).toBe("dimmi che ore sono e il meteo attuale a Roma")
+    expect(result!.prompt).toBe("tell me the time and the current weather in Rome")
   })
 
   // --- Invalid / rejected patterns ---
 
   it("returns null for plain text (no schedule)", () => {
-    expect(parseFreetextSchedule("dimmi ciao")).toBeNull()
+    expect(parseFreetextSchedule("say hello")).toBeNull()
   })
 
   it("returns null for schedule expression without prompt", () => {
-    expect(parseFreetextSchedule("ogni 30s")).toBeNull()
+    expect(parseFreetextSchedule("every 30s")).toBeNull()
     expect(parseFreetextSchedule("in 5m")).toBeNull()
     expect(parseFreetextSchedule("at 18:00")).toBeNull()
   })
@@ -99,12 +99,12 @@ describe("parseFreetextSchedule", () => {
   })
 
   it("returns null for unrelated text starting with numbers", () => {
-    expect(parseFreetextSchedule("30 minuti fa ho mangiato")).toBeNull()
+    expect(parseFreetextSchedule("30 minutes ago I had lunch")).toBeNull()
   })
 
   it("is case insensitive for schedule keywords", () => {
-    const result = parseFreetextSchedule("OGNI 30s dimmi ciao")
+    const result = parseFreetextSchedule("EVERY 30s say hello")
     expect(result).not.toBeNull()
-    expect(result!.scheduleExpr).toBe("OGNI 30s")
+    expect(result!.scheduleExpr).toBe("EVERY 30s")
   })
 })

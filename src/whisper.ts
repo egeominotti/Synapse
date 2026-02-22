@@ -131,7 +131,7 @@ async function transcribeLocal(audioPath: string, config: WhisperConfig): Promis
     "--flash-attn",
     "--no-prints",
     "--prompt",
-    "Trascrivi accuratamente.",
+    "Transcribe accurately.",
     "-f",
     wavPath,
   ]
@@ -152,7 +152,7 @@ async function transcribeLocal(audioPath: string, config: WhisperConfig): Promis
   ])
   clearTimeout(timeout)
 
-  if (timedOut) throw new Error("whisper-cli: timeout durante trascrizione")
+  if (timedOut) throw new Error("whisper-cli: transcription timeout")
 
   const exitCode = await proc.exited
   if (exitCode !== 0) {
@@ -161,7 +161,7 @@ async function transcribeLocal(audioPath: string, config: WhisperConfig): Promis
   }
 
   const text = parseWhisperOutput(stdout)
-  if (!text) throw new Error("whisper-cli: nessun testo trascritto")
+  if (!text) throw new Error("whisper-cli: no text transcribed")
 
   logger.info("Local whisper transcription complete", { length: text.length, language: config.language })
   return text

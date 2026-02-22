@@ -30,9 +30,9 @@ export function buildMemoryContext(messages: MemoryMessage[]): string | null {
   if (messages.length === 0) return null
 
   const lines: string[] = [
-    "## Memoria conversazioni precedenti",
+    "## Previous conversation memory",
     "",
-    "Queste sono le ultime interazioni con questo utente. Usale come contesto per rispondere in modo coerente.",
+    "These are the recent interactions with this user. Use them as context to respond consistently.",
     "",
   ]
 
@@ -66,9 +66,9 @@ export function buildFullConversationContext(messages: MemoryMessage[]): string 
   if (messages.length === 0) return null
 
   const lines: string[] = [
-    "## Conversazione completa",
+    "## Complete conversation",
     "",
-    "Questa e' la conversazione completa con l'utente. Rispondi in modo coerente con il contesto.",
+    "This is the complete conversation with the user. Respond consistently with the context.",
     "",
   ]
 

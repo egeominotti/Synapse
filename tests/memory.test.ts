@@ -11,7 +11,7 @@ describe("buildMemoryContext", () => {
       { prompt: "Ciao", response: "Ciao! Come posso aiutarti?", timestamp: "2024-06-15T10:30:00Z" },
     ]
     const result = buildMemoryContext(messages)!
-    expect(result).toContain("Memoria conversazioni precedenti")
+    expect(result).toContain("Previous conversation memory")
     expect(result).toContain("[2024-06-15] User: Ciao")
     expect(result).toContain("Assistant: Ciao! Come posso aiutarti?")
   })

@@ -13,7 +13,7 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Logging**: pino + pino-pretty (structured, stderr only)
 - **Scheduler**: croner (zero-dep cron with second-level precision)
 - **Voice**: Groq API (primary) + whisper-cli local (fallback), whisper-large-v3-turbo
-- **Testing**: bun:test (314 tests, 20 files)
+- **Testing**: bun:test (307 tests, 20 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
@@ -81,7 +81,7 @@ src/
   telegram/
     handlers.ts         → Message handlers: text, photo, document, voice, audio, edited (548 lines)
     commands.ts         → Bot commands: /start, /help, /reset, /stats, /config, etc. (503 lines)
-tests/                  → 314 tests across 20 files (3,273 lines)
+tests/                  → 307 tests across 20 files (3,273 lines)
 ```
 
 ## Commands
@@ -89,7 +89,7 @@ tests/                  → 314 tests across 20 files (3,273 lines)
 ```bash
 bun run index.ts          # Run REPL
 bun run run.ts            # Run Telegram bot
-bun test                  # Run tests (314 tests)
+bun test                  # Run tests (307 tests)
 bun run typecheck         # Type check (bunx tsc --noEmit)
 bun run lint              # ESLint
 bun run format            # Prettier write
@@ -211,7 +211,7 @@ scheduled_jobs    (id INTEGER PK, chat_id INTEGER, prompt TEXT, schedule_type TE
 
 ## Conventions
 
-- Italian UI strings in REPL and Telegram bot
+- English UI strings in REPL and Telegram bot
 - Logs go to stderr (pino) to keep stdout clean for CLI output
 - No build step — Bun JIT compiles TypeScript directly
 - External binaries spawned via `Bun.spawn()` (claude CLI, whisper-cli, ffmpeg)

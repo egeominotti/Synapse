@@ -124,27 +124,27 @@ export class HealthMonitor {
     const alerts: string[] = []
 
     // DB
-    if (prev.db && !current.db) alerts.push("DB SQLite non raggiungibile")
-    if (!prev.db && current.db) alerts.push("DB SQLite ripristinato")
+    if (prev.db && !current.db) alerts.push("SQLite DB unreachable")
+    if (!prev.db && current.db) alerts.push("SQLite DB restored")
 
     // Groq
-    if (prev.groq === true && current.groq === false) alerts.push("Groq API non raggiungibile")
-    if (prev.groq === false && current.groq === true) alerts.push("Groq API ripristinata")
+    if (prev.groq === true && current.groq === false) alerts.push("Groq API unreachable")
+    if (prev.groq === false && current.groq === true) alerts.push("Groq API restored")
 
     // Whisper
-    if (prev.whisper === true && current.whisper === false) alerts.push("whisper-cli non trovato")
-    if (prev.whisper === false && current.whisper === true) alerts.push("whisper-cli ripristinato")
+    if (prev.whisper === true && current.whisper === false) alerts.push("whisper-cli not found")
+    if (prev.whisper === false && current.whisper === true) alerts.push("whisper-cli restored")
 
     // Memory
     if (prev.memoryMb < MEMORY_THRESHOLD_MB && current.memoryMb >= MEMORY_THRESHOLD_MB) {
-      alerts.push(`Memoria elevata: ${current.memoryMb} MB`)
+      alerts.push(`High memory usage: ${current.memoryMb} MB`)
     }
     if (prev.memoryMb >= MEMORY_THRESHOLD_MB && current.memoryMb < MEMORY_THRESHOLD_MB) {
-      alerts.push(`Memoria normalizzata: ${current.memoryMb} MB`)
+      alerts.push(`Memory normalized: ${current.memoryMb} MB`)
     }
 
     if (alerts.length > 0) {
-      const isRecovery = alerts.every((a) => a.includes("ripristinat") || a.includes("normalizzat"))
+      const isRecovery = alerts.every((a) => a.includes("restored") || a.includes("normalized"))
       const emoji = isRecovery ? "✅" : "🚨"
       const msg =
         `${emoji} <b>Health Alert</b>\n\n` +
@@ -154,7 +154,7 @@ export class HealthMonitor {
       this.onAlert(msg)
 
       for (const alert of alerts) {
-        const level = alert.includes("ripristinat") || alert.includes("normalizzat") ? "info" : "error"
+        const level = alert.includes("restored") || alert.includes("normalized") ? "info" : "error"
         logger[level]("Health alert", { alert })
       }
     }

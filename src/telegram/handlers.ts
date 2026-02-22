@@ -94,9 +94,7 @@ export async function sendSandboxFiles(ctx: Context, agent: Agent, before: FileS
       const data = readFileSync(join(agent.sandboxDir, file.path))
       if (data.length === 0 || data.length > MAX_FILE_SIZE) {
         if (data.length > MAX_FILE_SIZE) {
-          await ctx.reply(
-            `⚠️ File troppo grande per Telegram: ${file.path} (${(data.length / 1024 / 1024).toFixed(1)} MB)`
-          )
+          await ctx.reply(`⚠️ File too large for Telegram: ${file.path} (${(data.length / 1024 / 1024).toFixed(1)} MB)`)
         }
         continue
       }
@@ -139,14 +137,14 @@ async function downloadFileAsBase64(
   const contentLength = Number(res.headers.get("content-length") ?? 0)
   if (contentLength > MAX_FILE_SIZE) {
     throw new Error(
-      `File troppo grande: ${(contentLength / 1024 / 1024).toFixed(1)} MB (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`
+      `File too large: ${(contentLength / 1024 / 1024).toFixed(1)} MB (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`
     )
   }
 
   const buffer = await res.arrayBuffer()
   if (buffer.byteLength > MAX_FILE_SIZE) {
     throw new Error(
-      `File troppo grande: ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`
+      `File too large: ${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`
     )
   }
   const base64 = Buffer.from(buffer).toString("base64")
@@ -208,7 +206,7 @@ async function executeWithRetry(
   })
 
   // Notify user which agent picked up the request
-  const statusMsg = `${identity.emoji} <b>${identity.name}</b> sta elaborando...`
+  const statusMsg = `${identity.emoji} <b>${identity.name}</b> is processing...`
   ctx.reply(statusMsg, { parse_mode: "HTML" }).catch(() => {})
 
   const execute = async (execAgent: Agent): Promise<void> => {
@@ -259,11 +257,11 @@ async function executeWithRetry(
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
         logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
         const rp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
-        await ctx.reply(`❌ Errore: ${retryMsg}`, rp)
+        await ctx.reply(`❌ Error: ${retryMsg}`, rp)
       }
     } else {
       const rp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
-      await ctx.reply(`❌ Errore: ${msg}`, rp)
+      await ctx.reply(`❌ Error: ${msg}`, rp)
     }
   } finally {
     pool.release(agent, isOverflow)
@@ -291,7 +289,7 @@ async function downloadFileToSandbox(
   const buffer = Buffer.from(await res.arrayBuffer())
   if (buffer.length > MAX_FILE_SIZE) {
     throw new Error(
-      `File troppo grande: ${(buffer.length / 1024 / 1024).toFixed(1)} MB (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`
+      `File too large: ${(buffer.length / 1024 / 1024).toFixed(1)} MB (max ${MAX_FILE_SIZE / 1024 / 1024} MB)`
     )
   }
 
@@ -310,13 +308,13 @@ async function downloadFileToSandbox(
  * Returns { scheduleExpr, prompt } if detected, null otherwise.
  *
  * Patterns:
- *   "ogni 30s dimmi ciao"         → every 30s, "dimmi ciao"
+ *   "every 30s say hello"         → every 30s, "say hello"
  *   "every 5m check status"       → every 5m, "check status"
- *   "tra 10m ricordami di..."     → in 10m, "ricordami di..."
- *   "alle 18:00 ricordami..."     → at 18:00, "ricordami..."
+ *   "in 10m remind me..."         → in 10m, "remind me..."
+ *   "at 18:00 remind me..."       → at 18:00, "remind me..."
  */
 const RE_FREETEXT_SCHEDULE =
-  /^(?:(?:ogni|every)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|(?:tra|in)\s+\d+\s*(?:s|m|h|sec|min|ore|ora|minuti|secondi)|(?:alle|ogni|every|at)\s+\d{1,2}:\d{2})\b/i
+  /^(?:every\s+\d+\s*(?:s|m|h|sec|min)|in\s+\d+\s*(?:s|m|h|sec|min)|(?:every|at)\s+\d{1,2}:\d{2})\b/i
 
 export function parseFreetextSchedule(text: string): { scheduleExpr: string; prompt: string } | null {
   const match = text.match(RE_FREETEXT_SCHEDULE)
@@ -326,8 +324,7 @@ export function parseFreetextSchedule(text: string): { scheduleExpr: string; pro
   const prompt = text.slice(match[0].length).trim()
   if (!prompt) return null
 
-  // Normalize "tra" → "in" for parseSchedule
-  const normalized = scheduleExpr.replace(/^tra\b/i, "in")
+  const normalized = scheduleExpr
 
   // Validate it actually parses
   try {
@@ -357,17 +354,17 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     //   try {
     //     const spec = parseSchedule(schedule.scheduleExpr)
     //     const jobId = deps.scheduler.createJob(ctx.chat.id, schedule.prompt, spec)
-    //     const runAtStr = spec.runAt.toLocaleString("it-IT", { timeZone: "Europe/Rome" })
+    //     const runAtStr = spec.runAt.toLocaleString("en-US", { timeZone: "Europe/Rome" })
     //     const typeLabel =
-    //       spec.type === "recurring" ? "🔄 Ricorrente" : spec.type === "delay" ? "⏳ Delay" : "📌 Una volta"
+    //       spec.type === "recurring" ? "🔄 Recurring" : spec.type === "delay" ? "⏳ Delay" : "📌 Once"
     //     const intervalInfo =
     //       spec.intervalMs && spec.intervalMs < 86_400_000
-    //         ? ` (ogni ${spec.intervalMs >= 3_600_000 ? `${spec.intervalMs / 3_600_000}h` : spec.intervalMs >= 60_000 ? `${spec.intervalMs / 60_000}m` : `${spec.intervalMs / 1_000}s`})`
+    //         ? ` (every ${spec.intervalMs >= 3_600_000 ? `${spec.intervalMs / 3_600_000}h` : spec.intervalMs >= 60_000 ? `${spec.intervalMs / 60_000}m` : `${spec.intervalMs / 1_000}s`})`
     //         : ""
     //     await ctx.reply(
-    //       `✅ Job #${jobId} creato\n\n` +
+    //       `✅ Job #${jobId} created\n\n` +
     //         `${typeLabel}${intervalInfo}\n` +
-    //         `Prossima esecuzione: *${runAtStr}*\n` +
+    //         `Next execution: *${runAtStr}*\n` +
     //         `Prompt: _${schedule.prompt.slice(0, 100)}${schedule.prompt.length > 100 ? "..." : ""}_`,
     //       { parse_mode: "Markdown" }
     //     )
@@ -386,7 +383,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
   })
 
   bot.on("message:photo", async (ctx) => {
-    const caption = ctx.message.caption ?? "Cosa vedi in questa immagine?"
+    const caption = ctx.message.caption ?? "What do you see in this image?"
     const largest = ctx.message.photo[ctx.message.photo.length - 1]
 
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
@@ -401,7 +398,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
           ctx,
           ctx.chat.id,
           (agent) => agent.callWithRawImage(mediaType, base64, caption),
-          `[foto] ${caption}`,
+          `[photo] ${caption}`,
           deps,
           async (history, messageId) => {
             if (messageId) {
@@ -416,7 +413,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
   bot.on("message:document", async (ctx) => {
     const doc = ctx.message.document
     const fileName = doc.file_name ?? "file"
-    const caption = ctx.message.caption ?? `Analizza il file ${fileName}`
+    const caption = ctx.message.caption ?? `Analyze the file ${fileName}`
 
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
 
@@ -426,7 +423,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
       const agent = deps.getAgent(ctx.chat.id)
       await downloadFileToSandbox(deps.botToken, ctx, doc.file_id, fileName, agent)
 
-      const prompt = `Ho caricato il file "${fileName}" nella directory corrente. ${caption}`
+      const prompt = `I uploaded the file "${fileName}" in the current directory. ${caption}`
       await withTyping(ctx, () => executeWithRetry(ctx, ctx.chat.id, (agent) => agent.call(prompt), prompt, deps))
     })
   })
@@ -435,7 +432,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     const edited = ctx.editedMessage!
     const prompt = edited.text
     if (!prompt || prompt.startsWith("/")) return
-    const corrected = `[Messaggio modificato] ${prompt}`
+    const corrected = `[Edited message] ${prompt}`
 
     deps.chatQueue.enqueue(edited.chat.id, async () => {
       logger.info("Edited text", { chatId: edited.chat.id, length: prompt.length })
@@ -450,8 +447,8 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     const photos = edited.photo
     if (!photos || photos.length === 0) return
     const largest = photos[photos.length - 1]
-    const caption = edited.caption ?? "Cosa vedi in questa immagine?"
-    const corrected = `[Messaggio modificato] ${caption}`
+    const caption = edited.caption ?? "What do you see in this image?"
+    const corrected = `[Edited message] ${caption}`
 
     deps.chatQueue.enqueue(edited.chat.id, async () => {
       logger.info("Edited photo", { chatId: edited.chat.id, fileId: largest.file_id })
@@ -463,7 +460,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
           ctx,
           edited.chat.id,
           (agent) => agent.callWithRawImage(mediaType, base64, corrected),
-          `[foto] ${corrected}`,
+          `[photo] ${corrected}`,
           deps,
           async (history, messageId) => {
             if (messageId) {
@@ -484,11 +481,11 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
 
     if (!deps.whisperConfig) {
       await ctx.reply(
-        "🎙 Trascrizione vocale non disponibile.\n\n" +
-          "Per abilitarla:\n" +
+        "🎙 Voice transcription not available.\n\n" +
+          "To enable it:\n" +
           "1. `brew install whisper-cpp ffmpeg`\n" +
-          "2. Scarica un modello: `curl -L -o model.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin`\n" +
-          "3. Imposta `WHISPER_MODEL_PATH=/path/to/model.bin`",
+          "2. Download a model: `curl -L -o model.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin`\n" +
+          "3. Set `WHISPER_MODEL_PATH=/path/to/model.bin`",
         { parse_mode: "Markdown" }
       )
       return
@@ -508,7 +505,7 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
         const voiceRp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
         await ctx.reply(`🎙 _"${text}"_`, { parse_mode: "Markdown", ...voiceRp })
 
-        const prompt = `[vocale] ${text}`
+        const prompt = `[voice] ${text}`
         await executeWithRetry(ctx, ctx.chat.id, (a) => a.call(prompt), prompt, deps)
       })
     })
@@ -519,10 +516,9 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
     const caption = ctx.message.caption
 
     if (!deps.whisperConfig) {
-      await ctx.reply(
-        "🎙 Trascrizione audio non disponibile.\n\nImposta `WHISPER_MODEL_PATH` per abilitare whisper-cpp.",
-        { parse_mode: "Markdown" }
-      )
+      await ctx.reply("🎙 Audio transcription not available.\n\nSet `WHISPER_MODEL_PATH` to enable whisper-cpp.", {
+        parse_mode: "Markdown",
+      })
       return
     }
 

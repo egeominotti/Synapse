@@ -60,25 +60,20 @@ describe("parseSchedule", () => {
     expect(spec.runAt.getHours()).toBe(9)
   })
 
-  it('parses "ogni 09:00" (Italian)', () => {
-    const spec = parseSchedule("ogni 09:00", now)
-    expect(spec.type).toBe("recurring")
-  })
-
   it("rejects invalid format", () => {
-    expect(() => parseSchedule("tomorrow 10am", now)).toThrow("Formato non valido")
+    expect(() => parseSchedule("tomorrow 10am", now)).toThrow("Invalid format")
   })
 
   it("rejects invalid hours", () => {
-    expect(() => parseSchedule("at 25:00", now)).toThrow("Ora non valida")
+    expect(() => parseSchedule("at 25:00", now)).toThrow("Invalid hour")
   })
 
   it("rejects invalid minutes", () => {
-    expect(() => parseSchedule("at 10:99", now)).toThrow("Minuti non validi")
+    expect(() => parseSchedule("at 10:99", now)).toThrow("Invalid minutes")
   })
 
   it("rejects zero delay", () => {
-    expect(() => parseSchedule("in 0m", now)).toThrow("maggiore di 0")
+    expect(() => parseSchedule("in 0m", now)).toThrow("greater than 0")
   })
 
   it('parses "every 30s" (interval seconds)', () => {
@@ -101,40 +96,7 @@ describe("parseSchedule", () => {
   })
 
   it("rejects interval below minimum (30s)", () => {
-    expect(() => parseSchedule("every 10s", now)).toThrow("Intervallo minimo")
-  })
-
-  // --- Italian aliases ---
-
-  it('parses "in 5 minuti"', () => {
-    const spec = parseSchedule("in 5 minuti", now)
-    expect(spec.type).toBe("delay")
-    expect(spec.runAt.getTime()).toBe(now.getTime() + 5 * 60_000)
-  })
-
-  it('parses "in 10 secondi"', () => {
-    const spec = parseSchedule("in 10 secondi", now)
-    expect(spec.type).toBe("delay")
-    expect(spec.runAt.getTime()).toBe(now.getTime() + 10_000)
-  })
-
-  it('parses "in 2 ore"', () => {
-    const spec = parseSchedule("in 2 ore", now)
-    expect(spec.type).toBe("delay")
-    expect(spec.runAt.getTime()).toBe(now.getTime() + 2 * 3_600_000)
-  })
-
-  it('parses "in 1 ora"', () => {
-    const spec = parseSchedule("in 1 ora", now)
-    expect(spec.type).toBe("delay")
-    expect(spec.runAt.getTime()).toBe(now.getTime() + 3_600_000)
-  })
-
-  it('parses "ogni 1m" (interval minutes)', () => {
-    const spec = parseSchedule("ogni 1m", now)
-    expect(spec.type).toBe("recurring")
-    expect(spec.intervalMs).toBe(60_000)
-    expect(spec.runAt.getTime()).toBe(now.getTime() + 60_000)
+    expect(() => parseSchedule("every 10s", now)).toThrow("Minimum interval")
   })
 
   it('parses "every 1h" (interval hours)', () => {
@@ -143,19 +105,12 @@ describe("parseSchedule", () => {
     expect(spec.intervalMs).toBe(3_600_000)
   })
 
-  it('parses "alle 14:30"', () => {
-    const spec = parseSchedule("alle 14:30", now)
-    expect(spec.type).toBe("once")
-    expect(spec.runAt.getHours()).toBe(14)
-    expect(spec.runAt.getMinutes()).toBe(30)
-  })
-
   it("rejects zero interval", () => {
-    expect(() => parseSchedule("every 0s", now)).toThrow("maggiore di 0")
+    expect(() => parseSchedule("every 0s", now)).toThrow("greater than 0")
   })
 
   it("rejects interval of 15s (below 30s minimum)", () => {
-    expect(() => parseSchedule("every 15s", now)).toThrow("Intervallo minimo")
+    expect(() => parseSchedule("every 15s", now)).toThrow("Minimum interval")
   })
 
   it("accepts exactly 30s interval", () => {
@@ -349,7 +304,7 @@ describe("Scheduler", () => {
       sched.createJob(1, `job ${i}`, spec)
     }
 
-    expect(() => sched.createJob(1, "one too many", spec)).toThrow("Limite raggiunto")
+    expect(() => sched.createJob(1, "one too many", spec)).toThrow("Limit reached")
     sched.stop()
   })
 
