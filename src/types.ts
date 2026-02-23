@@ -76,6 +76,10 @@ export interface AgentConfig {
   groqApiKey?: string
   /** Max concurrent agents per chat (1 = serial, >1 = overflow agents) */
   maxConcurrentPerChat: number
+  /** Enable auto-team collaboration mode (default: true) */
+  collaboration: boolean
+  /** Max agents per auto-team decomposition (safety cap, default: 20) */
+  maxTeamAgents: number
 }
 
 /** Result of a single agent call */
@@ -88,6 +92,33 @@ export interface AgentCallResult {
 
 /** Streaming event emitted during agent.callStream() */
 export type StreamEvent = { type: "text"; text: string } | { type: "done"; result: AgentCallResult }
+
+// ---------------------------------------------------------------------------
+// Team collaboration (orchestrator)
+// ---------------------------------------------------------------------------
+
+import type { AgentIdentity } from "./agent-identity"
+
+/** A sub-task decomposed by the master agent */
+export interface SubTask {
+  task: string
+}
+
+/** Result of a single worker's sub-task execution */
+export interface WorkerResult {
+  subtask: string
+  identity: AgentIdentity
+  result: AgentCallResult | null
+  error: string | null
+}
+
+/** Full result of a team collaboration */
+export interface TeamResult {
+  subtasks: SubTask[]
+  workerResults: WorkerResult[]
+  synthesis: AgentCallResult
+  totalDurationMs: number
+}
 
 /** Slash command handler signature */
 export type SlashCommandHandler = (args: string) => Promise<boolean>
@@ -114,6 +145,8 @@ export type RuntimeConfigKey =
   | "docker"
   | "docker_image"
   | "max_concurrent"
+  | "collaboration"
+  | "max_team_agents"
 
 /** Definition of a runtime-configurable parameter */
 export interface ConfigDefinition {

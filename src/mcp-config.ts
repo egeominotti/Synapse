@@ -2,14 +2,16 @@
  * MCP (Model Context Protocol) server configuration.
  * Generates and manages the MCP config file used by Claude CLI.
  *
- * Default servers (always active):
- *   - Memory          — persistent knowledge graph
- *   - Sequential Thinking — structured reasoning
+ * Active servers:
  *   - Fetch           — read any URL / webpage
- *   - Filesystem      — file access (scoped to sandbox)
- *   - Git             — clone, diff, log, blame
- *   - SQLite          — query SQLite databases
- *   - Everything      — universal file search
+ *
+ * Disabled (too much startup overhead for sandbox agents):
+ *   - Memory          — bot has its own memory system (src/memory.ts)
+ *   - Sequential Thinking — adds ~30s latency per spawn
+ *   - Filesystem      — Claude already has filesystem access in sandbox via CLI
+ *   - Git             — sandbox has no git repos
+ *   - SQLite          — bot manages DB internally
+ *   - Everything      — unnecessary in a temp sandbox
  */
 
 import { writeFileSync, mkdirSync } from "fs"
@@ -28,36 +30,35 @@ export interface McpConfig {
 
 const DEFAULT_MCP_SERVERS: McpConfig = {
   mcpServers: {
-    // --- Node.js servers (npx) ---
-    memory: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-memory"],
-    },
-    "sequential-thinking": {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
-    },
-    filesystem: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-filesystem"],
-    },
-    everything: {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-everything"],
-    },
-    // --- Python servers (uvx) ---
     fetch: {
       command: "uvx",
       args: ["mcp-server-fetch"],
     },
-    git: {
-      command: "uvx",
-      args: ["mcp-server-git"],
-    },
-    sqlite: {
-      command: "uvx",
-      args: ["mcp-server-sqlite"],
-    },
+    // --- Disabled: too much startup overhead ---
+    // memory: {
+    //   command: "npx",
+    //   args: ["-y", "@modelcontextprotocol/server-memory"],
+    // },
+    // "sequential-thinking": {
+    //   command: "npx",
+    //   args: ["-y", "@modelcontextprotocol/server-sequential-thinking"],
+    // },
+    // filesystem: {
+    //   command: "npx",
+    //   args: ["-y", "@modelcontextprotocol/server-filesystem"],
+    // },
+    // everything: {
+    //   command: "npx",
+    //   args: ["-y", "@modelcontextprotocol/server-everything"],
+    // },
+    // git: {
+    //   command: "uvx",
+    //   args: ["mcp-server-git"],
+    // },
+    // sqlite: {
+    //   command: "uvx",
+    //   args: ["mcp-server-sqlite"],
+    // },
   },
 }
 

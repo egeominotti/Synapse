@@ -32,7 +32,7 @@ const MATRIX_NAMES = [
   "Mifune",
 ]
 
-const COLOR_EMOJIS = ["🔴", "🟢", "🔵", "🟡", "🟣", "🟠"]
+const COLOR_EMOJIS = ["◈", "◇", "△", "▽", "◎", "▣"]
 
 const ALPHA_NUM = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
@@ -61,7 +61,7 @@ export function generateIdentity(jobId: number): AgentIdentity {
 export const ORCHESTRATOR_IDENTITY: AgentIdentity = {
   name: "Neo",
   code: "NEO-01",
-  emoji: "🤖",
+  emoji: "◉",
 }
 
 /** Format identity as a header line for Telegram messages. */

@@ -15,6 +15,8 @@ const baseConfig: AgentConfig = {
   dockerImage: "test:latest",
   systemPrompt: undefined,
   maxConcurrentPerChat: 1,
+  collaboration: true,
+  maxTeamAgents: 20,
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +195,7 @@ describe("Agent.buildArgs", () => {
     expect(args).toContain("--output-format")
     expect(args).toContain("json")
     expect(args).toContain("--dangerously-skip-permissions")
+    expect(args).toContain("-p")
     expect(args).toContain("hello")
   })
 
@@ -247,6 +250,102 @@ describe("Agent.buildArgs", () => {
     const args = agent.buildArgs("hello")
     expect(args).toContain("--mcp-config")
     expect(args).toContain("/tmp/mcp.json")
+  })
+
+  it("includes --tools '' when disableTools is true", () => {
+    const agent = new Agent(baseConfig)
+    agent.disableTools = true
+    const args = agent.buildArgs("hello")
+    expect(args).toContain("--tools")
+    expect(args).toContain("")
+    // Prompt must use -p flag to avoid being consumed by --tools
+    const pIndex = args.indexOf("-p")
+    expect(pIndex).toBeGreaterThan(-1)
+    expect(args[pIndex + 1]).toBe("hello")
+  })
+
+  it("does not include --tools when disableTools is false (default)", () => {
+    const agent = new Agent(baseConfig)
+    const args = agent.buildArgs("hello")
+    expect(args).not.toContain("--tools")
+  })
+
+  it("uses -p flag for prompt", () => {
+    const agent = new Agent(baseConfig)
+    const args = agent.buildArgs("my prompt")
+    const pIndex = args.indexOf("-p")
+    expect(pIndex).toBeGreaterThan(-1)
+    expect(args[pIndex + 1]).toBe("my prompt")
+  })
+
+  it("includes --allowed-tools when allowedTools is set", () => {
+    const agent = new Agent(baseConfig)
+    agent.allowedTools = "Bash Read Write Edit"
+    const args = agent.buildArgs("hello")
+    expect(args).toContain("--allowed-tools")
+    expect(args).toContain("Bash Read Write Edit")
+    expect(args).not.toContain("--tools")
+  })
+
+  it("disableTools takes priority over allowedTools", () => {
+    const agent = new Agent(baseConfig)
+    agent.disableTools = true
+    agent.allowedTools = "Bash Read"
+    const args = agent.buildArgs("hello")
+    expect(args).toContain("--tools")
+    expect(args).not.toContain("--allowed-tools")
+  })
+
+  it("includes worker mode flags when workerMode is true", () => {
+    const agent = new Agent(baseConfig)
+    agent.workerMode = true
+    const args = agent.buildArgs("hello")
+    expect(args).toContain("--no-session-persistence")
+    expect(args).toContain("--disable-slash-commands")
+  })
+
+  it("does not include worker mode flags by default", () => {
+    const agent = new Agent(baseConfig)
+    const args = agent.buildArgs("hello")
+    expect(args).not.toContain("--no-session-persistence")
+    expect(args).not.toContain("--disable-slash-commands")
+  })
+
+  it("includes --effort when effort is set", () => {
+    const agent = new Agent(baseConfig)
+    agent.effort = "high"
+    const args = agent.buildArgs("hello")
+    expect(args).toContain("--effort")
+    expect(args).toContain("high")
+  })
+
+  it("does not include --effort by default", () => {
+    const agent = new Agent(baseConfig)
+    const args = agent.buildArgs("hello")
+    expect(args).not.toContain("--effort")
+  })
+
+  it("combines all flags correctly for master agent", () => {
+    const agent = new Agent(baseConfig)
+    agent.disableTools = true
+    agent.effort = "high"
+    const args = agent.buildArgs("test")
+    expect(args).toContain("--tools")
+    expect(args).toContain("--effort")
+    expect(args).toContain("high")
+    expect(args).not.toContain("--no-session-persistence")
+  })
+
+  it("combines all flags correctly for worker agent", () => {
+    const agent = new Agent(baseConfig)
+    agent.allowedTools = "Bash Read Write"
+    agent.workerMode = true
+    const args = agent.buildArgs("test")
+    expect(args).toContain("--allowed-tools")
+    expect(args).toContain("--no-session-persistence")
+    expect(args).toContain("--disable-slash-commands")
+    expect(args).not.toContain("--tools")
+    expect(args).not.toContain("--effort")
   })
 })
 

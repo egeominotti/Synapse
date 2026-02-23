@@ -15,7 +15,7 @@ Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wrap
 - **Logging**: pino + pino-pretty (structured, stderr only)
 - **Scheduler**: croner (zero-dep cron with second-level precision)
 - **Voice**: Groq API (primary) + whisper-cli local (fallback), whisper-large-v3-turbo
-- **Testing**: bun:test (307 tests, 20 files)
+- **Testing**: bun:test (362 tests, 21 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
@@ -46,7 +46,8 @@ Whisper (src/whisper.ts)             Groq API (primary) + whisper-cli local (fal
 HealthMonitor (src/health.ts)        System stability checks every 30s with Telegram alerts
 Sandbox (src/sandbox.ts)             Isolated /tmp dirs with safety rules per agent
 Memory (src/memory.ts)               Conversation context builder for worker agents
-McpConfig (src/mcp-config.ts)        MCP server configuration (memory, thinking, fs, fetch, git, sqlite)
+McpConfig (src/mcp-config.ts)        MCP server configuration (disabled — startup overhead)
+Orchestrator (src/orchestrator.ts)   Auto-team: detect decomposition, execute workers, synthesize
 ```
 
 ## Project Structure
@@ -56,13 +57,14 @@ index.ts                → REPL entry point (125 lines)
 run.ts                  → Telegram bot entry point (346 lines)
 src/
   agent.ts              → Claude CLI wrapper: spawn, retry, timeout, vision, streaming (486 lines)
-  agent-pool.ts         → Per-chat agent pool: master + workers + overflow (163 lines)
-  agent-identity.ts     → Matrix-themed identity generator: names, codes, emojis (84 lines)
+  agent-pool.ts         → Per-chat agent pool: master + workers + overflow, lazy init (250 lines)
+  agent-identity.ts     → Matrix-themed identity generator: names, codes, geometric symbols (84 lines)
+  orchestrator.ts       → Auto-team: detectTeamResponse, executeTeam, synthesize (180 lines)
   semaphore.ts          → Counting semaphore for concurrent task limiting (46 lines)
   health.ts             → Health monitor: DB, Groq, whisper, memory checks (204 lines)
   sandbox.ts            → Sandbox creation, safety rules, spawn env caching (307 lines)
   memory.ts             → Conversation memory context builder (89 lines)
-  mcp-config.ts         → MCP server configuration: memory, thinking, fs, git, sqlite (78 lines)
+  mcp-config.ts         → MCP server configuration (disabled — startup overhead) (78 lines)
   db-core.ts            → Database base class: schema, sessions, messages, attachments (448 lines)
   db.ts                 → Database extends core: Telegram sessions, config, jobs (201 lines)
   chat-queue.ts         → Per-chat message queue with semaphore concurrency (56 lines)
@@ -81,9 +83,9 @@ src/
   utils.ts              → Duration formatting helper (9 lines)
   index.ts              → Barrel re-exports (28 lines)
   telegram/
-    handlers.ts         → Message handlers: text, photo, document, voice, audio, edited (548 lines)
+    handlers.ts         → Message handlers: text, photo, document, voice, audio, edited, auto-team (620 lines)
     commands.ts         → Bot commands: /start, /help, /reset, /stats, /config, etc. (503 lines)
-tests/                  → 307 tests across 20 files (3,273 lines)
+tests/                  → 362 tests across 21 files
 ```
 
 ## Commands
@@ -91,7 +93,7 @@ tests/                  → 307 tests across 20 files (3,273 lines)
 ```bash
 bun run index.ts          # Run REPL
 bun run run.ts            # Run Telegram bot
-bun test                  # Run tests (307 tests)
+bun test                  # Run tests (362 tests)
 bun run typecheck         # Type check (bunx tsc --noEmit)
 bun run lint              # ESLint
 bun run format            # Prettier write
@@ -105,15 +107,20 @@ bun install               # Install deps
 
 - **No Claude SDK**: Agent spawns `claude` CLI with `--print --output-format json` flags
 - **Session continuity**: `--resume <sessionId>` flag resumes conversations
+- **Master agent**: `--tools ""` (text-only, no tool use) + `--effort high` for quality decisions
+- **Worker agents**: `--tools ""` + `--no-session-persistence` + `--disable-slash-commands` (workerMode)
+- **Prompt flag**: Always uses `-p` for explicit prompt (avoids `--tools ""` consuming positional arg)
 - **Vision**: `--input-format stream-json` with base64 image data via stdin
 - **Streaming**: Line-by-line JSON event parsing via `--output-format stream-json`
 - **Retry**: Exponential backoff on transient errors (429, 503, ETIMEDOUT, ECONNRESET)
 - **Timeout**: Configurable per-process timeout (default: disabled), hard safety cap at 5 minutes
 - **Concurrent I/O**: Reads stdout/stderr in parallel via Promise.all to prevent pipe deadlock
 
-### Concurrency
+### Concurrency & Auto-Team
 
-- **Agent pool**: Master agent (--resume) + N-1 worker agents (fresh memory each acquire)
+- **Agent pool**: Master agent (--resume) + N-1 worker agents (fresh memory each acquire), lazy init
+- **Auto-team**: Master autonomously decomposes complex tasks into parallel subtasks (JSON array response)
+- **Orchestrator**: `detectTeamResponse()` parses master reply, `executeTeam()` runs workers in parallel, `synthesize()` merges results
 - **Semaphore-based ChatQueue**: N concurrent calls per chat (configurable 1-10)
 - **LRU eviction**: Telegram bot caps agent pools at 500, cleanup on eviction
 - **Overflow agents**: Temporary agents created when pool exhausted, cleaned up on release
@@ -129,7 +136,8 @@ bun install               # Install deps
 
 - **HTML formatted output**: Markdown → Telegram HTML with smart chunking (4096 char limit) + plain text fallback
 - **Edited message support**: Re-processes with `[Messaggio modificato]` prefix
-- **DRY handlers**: `executeWithRetry()` handles acquire/snapshot/call/history/format/retry/release
+- **DRY handlers**: `executeWithRetry()` handles acquire/snapshot/call/history/format/retry/release + auto-team detection
+- **Single status message**: Progress updates via `editMessageText` (no spam), deleted before final response
 - **Voice-to-text**: Groq API primary (OGG direct, <1 sec) → local whisper-cli fallback
 - **Sandbox file delivery**: New files in `output/` directory auto-sent to user
 - **Reply-to-original**: Responses reply to the original user message in groups and DMs
@@ -188,6 +196,8 @@ Admin can change at runtime via `/config <key> <value>`:
 | `docker`           | boolean | `false`               | true/false               |
 | `docker_image`     | string  | `claude-agent:latest` | —                        |
 | `max_concurrent`   | number  | `1`                   | 1–10                     |
+| `collaboration`    | boolean | `true`                | true/false               |
+| `max_team_agents`  | number  | `20`                  | 2–50                     |
 
 Changes are validated, persisted in SQLite, and applied immediately. They survive restarts.
 

@@ -9,7 +9,6 @@
  */
 
 import { Bot } from "grammy"
-import { join } from "path"
 import { loadConfig } from "./src/config"
 import { Database } from "./src/db"
 import { Agent } from "./src/agent"
@@ -25,10 +24,9 @@ import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, type TelegramDeps } from "./src/telegram/handlers"
 import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
 import { buildMemoryContext } from "./src/memory"
-import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
+import { getMcpServerNames } from "./src/mcp-config"
 import { HealthMonitor } from "./src/health"
 import { generateTeamIdentities } from "./src/agent-identity"
-import { dirname } from "path"
 
 // ---------------------------------------------------------------------------
 // Init
@@ -43,11 +41,11 @@ if (!botToken) {
 const agentConfig = loadConfig()
 logger.setMinLevel((Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO") as LogLevel)
 
-// Generate MCP config (Memory + Sequential Thinking) if not explicitly set
-if (!agentConfig.mcpConfigPath) {
-  agentConfig.mcpConfigPath = join(dirname(agentConfig.dbPath), "mcp.json")
-}
-ensureMcpConfig(agentConfig.mcpConfigPath)
+// MCP disabled — startup overhead too high for sandbox agents
+// if (!agentConfig.mcpConfigPath) {
+//   agentConfig.mcpConfigPath = join(dirname(agentConfig.dbPath), "mcp.json")
+// }
+// ensureMcpConfig(agentConfig.mcpConfigPath)
 
 const db = new Database(agentConfig.dbPath)
 const store = new SessionStore(db)
@@ -343,6 +341,7 @@ bot.start({
           `> workers:  ${agentConfig.maxConcurrentPerChat}x per chat\n` +
           `> health:   every 30s\n` +
           `> chats:    ${knownChatIds.length}\n` +
+          `> collab:   ${agentConfig.collaboration ? `enabled (max ${agentConfig.maxTeamAgents} agents)` : "disabled"}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
           `> retry:    ${agentConfig.maxRetries}x\n` +
           `> status:   ONLINE` +

@@ -10,7 +10,7 @@ import { InputFile, type Bot, type Context } from "grammy"
 import { Agent } from "../agent"
 import type { AgentPool } from "../agent-pool"
 import type { HistoryManager } from "../history"
-import type { AgentCallResult, AgentConfig } from "../types"
+import type { AgentCallResult, AgentConfig, SubTask } from "../types"
 import type { Database } from "../db"
 import type { SessionStore } from "../session-store"
 import type { RuntimeConfig } from "../runtime-config"
@@ -18,7 +18,8 @@ import type { ChatQueue } from "../chat-queue"
 import type { Scheduler } from "../scheduler"
 import { parseSchedule } from "../scheduler"
 import { formatForTelegram } from "../formatter"
-import { formatIdentityHeader } from "../agent-identity"
+import { formatIdentityHeader, generateIdentity, type AgentIdentity } from "../agent-identity"
+import { detectTeamResponse, executeTeam, synthesize } from "../orchestrator"
 import type { WhisperConfig } from "../whisper"
 import { transcribe } from "../whisper"
 import { logger } from "../logger"
@@ -184,6 +185,15 @@ function resetAgentSession(chatId: number, deps: TelegramDeps): Agent {
 // DRY core: execute agent call with retry on session errors
 // ---------------------------------------------------------------------------
 
+/** Helper: safely edit a status message, swallowing errors */
+async function editStatus(ctx: Context, chatId: number, msgId: number, text: string): Promise<void> {
+  try {
+    await ctx.api.editMessageText(chatId, msgId, text, { parse_mode: "HTML" })
+  } catch {
+    /* message may have been deleted or text unchanged */
+  }
+}
+
 async function executeWithRetry(
   ctx: Context,
   chatId: number,
@@ -197,6 +207,7 @@ async function executeWithRetry(
   const identityHeader = formatIdentityHeader(identity)
   const role = isOverflow ? "worker" : "master"
   const promptPreview = historyPrompt.slice(0, 80) + (historyPrompt.length > 80 ? "..." : "")
+  const replyTo = ctx.msg?.message_id
 
   logger.info(`${identity.emoji} ${identity.name} acquired`, {
     chatId,
@@ -205,22 +216,50 @@ async function executeWithRetry(
     prompt: promptPreview,
   })
 
-  // Notify user which agent picked up the request
-  const statusMsg = `${identity.emoji} <b>${identity.name}</b> is processing...`
-  ctx.reply(statusMsg, { parse_mode: "HTML" }).catch(() => {})
+  // Single status message — will be edited with progress, then deleted on completion
+  const replyParams = replyTo ? { reply_parameters: { message_id: replyTo } } : {}
+  let statusMsgId: number | null = null
+  try {
+    const sent = await ctx.reply(`${identity.emoji} <b>${identity.name}</b> ...`, {
+      parse_mode: "HTML",
+      ...replyParams,
+    })
+    statusMsgId = sent.message_id
+  } catch {
+    /* non-critical */
+  }
 
   const execute = async (execAgent: Agent): Promise<void> => {
     const before = snapshotSandbox(execAgent)
     const result = await callFn(execAgent)
 
+    const responsePreview = result.text.slice(0, 200) + (result.text.length > 200 ? "..." : "")
     logger.info(`${identity.emoji} ${identity.name} responded`, {
       chatId,
       agent: identity.name,
       durationMs: result.durationMs,
       tokens: result.tokenUsage ? `${result.tokenUsage.inputTokens}→${result.tokenUsage.outputTokens}` : "n/a",
+      responseLength: result.text.length,
+      response: responsePreview,
     })
 
-    // Always record history under the primary agent's session
+    // Auto-team: if collaboration is enabled and master returned a decomposition, launch workers
+    if (!isOverflow && deps.agentConfig.collaboration) {
+      const subtasks = detectTeamResponse(result.text, deps.agentConfig.maxTeamAgents)
+      if (subtasks) {
+        logger.info("Auto-team triggered", { chatId, subtaskCount: subtasks.length })
+        // Master stays busy (acquired) during the entire team flow — released in finally block
+        await handleAutoTeam(ctx, chatId, historyPrompt, subtasks, pool, deps, statusMsgId)
+        return
+      }
+    }
+
+    // Delete status message — the real response replaces it
+    if (statusMsgId) {
+      ctx.api.deleteMessage(chatId, statusMsgId).catch(() => {})
+    }
+
+    // Normal response — record history, send formatted, deliver files
     const primaryAgent = pool.getPrimary()
     const history = deps.getHistory(chatId, primaryAgent)
     const messageId = await history.addMessage({
@@ -247,6 +286,11 @@ async function executeWithRetry(
     const msg = err instanceof Error ? err.message : String(err)
     logger.error(`${identity.emoji} ${identity.name} failed`, { chatId, agent: identity.name, error: msg })
 
+    // Update status message with error instead of sending new one
+    if (statusMsgId) {
+      await editStatus(ctx, chatId, statusMsgId, `✗ ${identity.emoji} <b>${identity.name}</b> — ${msg}`)
+    }
+
     if (!isOverflow && isSessionError(msg)) {
       logger.info("Stale session, resetting with fresh agent", { chatId })
       try {
@@ -256,12 +300,14 @@ async function executeWithRetry(
       } catch (retryErr) {
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
         logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
-        const rp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
-        await ctx.reply(`❌ Error: ${retryMsg}`, rp)
+        if (statusMsgId) {
+          await editStatus(ctx, chatId, statusMsgId, `✗ Error: ${retryMsg}`)
+        } else {
+          await ctx.reply(`✗ Error: ${retryMsg}`, replyParams)
+        }
       }
-    } else {
-      const rp = ctx.msg ? { reply_parameters: { message_id: ctx.msg.message_id } } : {}
-      await ctx.reply(`❌ Error: ${msg}`, rp)
+    } else if (!statusMsgId) {
+      await ctx.reply(`✗ Error: ${msg}`, replyParams)
     }
   } finally {
     pool.release(agent, isOverflow)
@@ -337,6 +383,179 @@ export function parseFreetextSchedule(text: string): { scheduleExpr: string; pro
   }
 
   return { scheduleExpr: normalized, prompt }
+}
+
+// ---------------------------------------------------------------------------
+// Auto-team: parallel worker execution when master decomposes a task
+// ---------------------------------------------------------------------------
+
+/** Build a compact progress display for the status message */
+function buildTeamProgress(
+  subtasks: SubTask[],
+  workerIdentities: AgentIdentity[],
+  workerStatus: Array<{ done: boolean; error: boolean; secs: string }>,
+  phase: string
+): string {
+  const lines: string[] = [`▶ <b>${phase}</b>\n`]
+  for (let i = 0; i < subtasks.length; i++) {
+    const id = workerIdentities[i]
+    const s = workerStatus[i]
+    const icon = s.done ? (s.error ? "✗" : "✓") : "◌"
+    const time = s.done ? ` ${s.secs}s` : ""
+    const taskPreview = subtasks[i].task.slice(0, 60) + (subtasks[i].task.length > 60 ? "…" : "")
+    lines.push(`${icon} ${id.emoji} <b>${id.name}</b>${time} — ${taskPreview}`)
+  }
+  return lines.join("\n")
+}
+
+async function handleAutoTeam(
+  ctx: Context,
+  chatId: number,
+  originalPrompt: string,
+  subtasks: SubTask[],
+  pool: AgentPool,
+  deps: TelegramDeps,
+  statusMsgId: number | null
+): Promise<void> {
+  const startTime = performance.now()
+  const workerIdentities = subtasks.map((_, i) => generateIdentity(i + 1))
+  const workerStatus: Array<{ done: boolean; error: boolean; secs: string }> = subtasks.map(() => ({
+    done: false,
+    error: false,
+    secs: "",
+  }))
+
+  // Show initial plan in the status message
+  const initialProgress = buildTeamProgress(
+    subtasks,
+    workerIdentities,
+    workerStatus,
+    `${subtasks.length} agents dispatched`
+  )
+  if (statusMsgId) {
+    await editStatus(ctx, chatId, statusMsgId, initialProgress)
+  } else {
+    // Fallback: send new message if no status message exists
+    const replyTo = ctx.msg?.message_id
+    const rp = replyTo ? { reply_parameters: { message_id: replyTo } } : {}
+    try {
+      const sent = await ctx.reply(initialProgress, { parse_mode: "HTML", ...rp })
+      statusMsgId = sent.message_id
+    } catch {
+      /* non-critical */
+    }
+  }
+
+  // Execute in parallel — update status message on each completion
+  logger.info("Dispatching sub-tasks to workers", { chatId, workerCount: subtasks.length })
+  let completed = 0
+  const { workers, results } = await executeTeam(pool, subtasks, (progress) => {
+    completed++
+    const secs = (progress.durationMs / 1000).toFixed(1)
+
+    // Find which worker this is by matching identity
+    const idx = workerIdentities.findIndex((id) => id.name === progress.identity.name)
+    if (idx >= 0) {
+      workerStatus[idx] = { done: true, error: !!progress.error, secs }
+    }
+
+    if (progress.error) {
+      logger.error("Worker failed", {
+        chatId,
+        worker: `${progress.identity.emoji} ${progress.identity.name}`,
+        subtask: progress.subtask.slice(0, 80),
+        error: progress.error,
+        durationMs: progress.durationMs,
+        progress: `${completed}/${subtasks.length}`,
+      })
+    } else {
+      logger.info("Worker completed", {
+        chatId,
+        worker: `${progress.identity.emoji} ${progress.identity.name}`,
+        subtask: progress.subtask.slice(0, 80),
+        durationMs: progress.durationMs,
+        resultLength: progress.result?.text.length ?? 0,
+        progress: `${completed}/${subtasks.length}`,
+      })
+    }
+
+    // Update status message with progress (fire-and-forget — race between workers is harmless,
+    // progress is monotonically increasing so last edit always shows the latest state)
+    if (statusMsgId) {
+      const phase = completed < subtasks.length ? `${completed}/${subtasks.length} done` : "All done — synthesizing"
+      const progressText = buildTeamProgress(subtasks, workerIdentities, workerStatus, phase)
+      editStatus(ctx, chatId, statusMsgId, progressText).catch(() => {})
+    }
+  })
+
+  // Synthesize and release workers (try-finally guarantees release even on errors)
+  try {
+    const successCount = results.filter((r) => r.result !== null).length
+    if (successCount === 0) {
+      if (statusMsgId) {
+        await editStatus(ctx, chatId, statusMsgId, "✗ All agents failed. No results to synthesize.")
+      }
+      return
+    }
+
+    logger.info("All workers done, starting synthesis", {
+      chatId,
+      succeeded: successCount,
+      failed: subtasks.length - successCount,
+    })
+
+    const master = pool.getPrimary()
+    const synthesis = await synthesize(master, originalPrompt, results)
+
+    if (!synthesis) {
+      if (statusMsgId) {
+        await editStatus(ctx, chatId, statusMsgId, "✗ Synthesis failed.")
+      }
+      return
+    }
+
+    // Delete status message — final response replaces it
+    if (statusMsgId) {
+      ctx.api.deleteMessage(chatId, statusMsgId).catch(() => {})
+    }
+
+    // Send final response (replies to original user message)
+    const totalDurationMs = Math.round(performance.now() - startTime)
+    const totalSecs = (totalDurationMs / 1000).toFixed(1)
+    const meta = `${totalSecs}s · ${subtasks.length} agents`
+    const { chunks, parseMode } = formatForTelegram(synthesis.text, meta, "◉ Synthesis complete")
+
+    const replyTo = ctx.msg?.message_id
+    for (let i = 0; i < chunks.length; i++) {
+      const rp = i === 0 && replyTo ? { reply_parameters: { message_id: replyTo } } : {}
+      try {
+        await ctx.reply(chunks[i], { ...(parseMode ? { parse_mode: parseMode } : {}), ...rp })
+      } catch {
+        await ctx.reply(chunks[i], rp)
+      }
+    }
+
+    // Record in history
+    const history = deps.getHistory(chatId, master)
+    await history.addMessage({
+      timestamp: new Date().toISOString(),
+      prompt: `[auto-team] ${originalPrompt}`,
+      response: synthesis.text,
+      durationMs: totalDurationMs,
+      tokenUsage: synthesis.tokenUsage,
+    })
+    await deps.persistSession(chatId, master)
+
+    logger.info("Auto-team complete", {
+      chatId,
+      subtasks: subtasks.length,
+      succeeded: successCount,
+      failed: subtasks.length - successCount,
+      totalDurationMs,
+    })
+  } finally {
+    pool.releaseMultiple(workers)
+  }
 }
 
 // ---------------------------------------------------------------------------

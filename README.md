@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/database-SQLite-003b57?logo=sqlite&logoColor=fff" alt="SQLite"/>
   <img src="https://img.shields.io/badge/bot-Telegram-26a5e4?logo=telegram&logoColor=fff" alt="Telegram"/>
   <img src="https://img.shields.io/badge/AI-Claude-d4a574?logo=anthropic&logoColor=fff" alt="Claude"/>
-  <img src="https://img.shields.io/badge/tests-307_passed-brightgreen" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-362_passed-brightgreen" alt="Tests"/>
 </p>
 
 ---
@@ -22,16 +22,18 @@
 
 - **Dual interface**: Interactive REPL terminal + multi-chat Telegram bot
 - **Session continuity**: Conversations resume across restarts via `--resume` flag
-- **Concurrent agents**: Master/worker pool per chat with configurable concurrency (1–10)
+- **Concurrent agents**: Master/worker pool per chat with configurable concurrency (1–10), lazy worker init
+- **Auto-team collaboration**: Master autonomously decomposes complex tasks into parallel subtasks, workers execute in parallel, results synthesized
 - **Vision**: Photo and document analysis via base64 streaming
 - **Voice-to-text**: Groq API (primary, <1 sec) + local whisper-cli fallback
 - **Job scheduler**: Cron, interval, delay, and one-shot scheduled prompts
 - **Sandbox isolation**: Each agent runs in an isolated `/tmp/neo-agent-*` directory with safety rules
 - **Health monitoring**: DB, Groq, whisper, memory checks every 30s with Telegram alerts
 - **Runtime config**: All agent parameters configurable live via `/config` (admin only, persisted)
-- **MCP servers**: Memory, sequential thinking, filesystem, fetch, git, SQLite
-- **Matrix-themed identities**: Agents get unique names (Neo, Morpheus, Trinity...) + color emojis
-- **307 tests** across 20 files with pre-commit hooks and CI pipeline
+- **MCP servers**: Memory, sequential thinking, filesystem, fetch, git, SQLite (currently disabled for startup speed)
+- **Matrix-themed identities**: Agents get unique names (Neo, Morpheus, Trinity...) + geometric symbols (◉ ◈ ◇ △ ▽ ◎ ▣)
+- **Single-message UX**: Telegram progress via `editMessageText` (no spam), responses reply to original message
+- **362 tests** across 21 files with pre-commit hooks and CI pipeline
 
 ## Requirements
 
@@ -136,6 +138,8 @@ Modify agent parameters at runtime via Telegram — changes are validated, persi
 | `docker`           | boolean | `false`               | —                     |
 | `docker_image`     | string  | `claude-agent:latest` | —                     |
 | `max_concurrent`   | number  | `1`                   | 1–10                  |
+| `collaboration`    | boolean | `true`                | —                     |
+| `max_team_agents`  | number  | `20`                  | 2–50                  |
 
 ## Usage
 
@@ -216,7 +220,8 @@ Database ◄── RuntimeConfig, Scheduler, HealthMonitor
 ### Key Design Decisions
 
 - **CLI wrapping over SDK**: Full control over process lifecycle, timeout, streaming, and version independence
-- **Master/worker pool**: Master preserves session via `--resume`, workers get conversation memory injection
+- **Master/worker pool**: Master preserves session via `--resume` (text-only, `--effort high`), workers get conversation memory injection (text-only, `--no-session-persistence`)
+- **Auto-team orchestration**: Master detects complex tasks, decomposes into parallel subtasks, workers execute, master synthesizes
 - **SQLite WAL**: Atomic writes, concurrent reads, crash-safe persistence
 - **Semaphore-based queuing**: Per-chat FIFO concurrency control
 - **Sandbox isolation**: Each agent in `/tmp/neo-agent-*` with comprehensive cross-platform safety rules
@@ -231,7 +236,8 @@ run.ts                  → Telegram bot entry point
 src/
   agent.ts              → Claude CLI wrapper (spawn, retry, timeout, vision, streaming)
   agent-pool.ts         → Per-chat agent pool (master + workers + overflow)
-  agent-identity.ts     → Matrix-themed identity generator (names, codes, emojis)
+  agent-identity.ts     → Matrix-themed identity generator (names, codes, geometric symbols)
+  orchestrator.ts       → Auto-team: detect decomposition, execute workers, synthesize
   semaphore.ts          → Counting semaphore (FIFO)
   health.ts             → Health monitor (DB, Groq, whisper, memory, every 30s)
   sandbox.ts            → Sandbox creation, safety rules, spawn env caching
@@ -255,9 +261,9 @@ src/
   utils.ts              → Duration formatting helper
   index.ts              → Barrel re-exports
   telegram/
-    handlers.ts         → Message handlers (text, photo, document, voice, edited)
+    handlers.ts         → Message handlers (text, photo, document, voice, edited, auto-team)
     commands.ts         → Bot commands (/start, /help, /reset, /stats, /config, etc.)
-tests/                  → 307 tests across 20 files
+tests/                  → 362 tests across 21 files
 ```
 
 ### Database Schema
@@ -276,7 +282,7 @@ scheduled_jobs    (id PK, chat_id, prompt, schedule_type, cron_expr, run_at, int
 ## Development
 
 ```bash
-bun test              # 307 tests across 20 files
+bun test              # 362 tests across 21 files
 bun run typecheck     # TypeScript strict check
 bun run lint          # ESLint + typescript-eslint
 bun run format        # Prettier auto-format

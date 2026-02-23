@@ -75,6 +75,20 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
       min: 1,
       max: 10,
     },
+    {
+      key: "collaboration",
+      type: "boolean",
+      description: "Enable auto-team collaboration mode",
+      defaultValue: String(defaults.collaboration),
+    },
+    {
+      key: "max_team_agents",
+      type: "number",
+      description: "Max parallel agents per auto-team decomposition",
+      defaultValue: String(defaults.maxTeamAgents),
+      min: 2,
+      max: 50,
+    },
   ]
 }
 
@@ -145,6 +159,10 @@ export class RuntimeConfig {
         return this.config.dockerImage
       case "max_concurrent":
         return String(this.config.maxConcurrentPerChat)
+      case "collaboration":
+        return String(this.config.collaboration)
+      case "max_team_agents":
+        return String(this.config.maxTeamAgents)
     }
   }
 
@@ -271,6 +289,12 @@ export class RuntimeConfig {
       case "max_concurrent":
         this.config.maxConcurrentPerChat = Number(value)
         this.onMaxConcurrentChange?.(Number(value))
+        break
+      case "collaboration":
+        this.config.collaboration = value === "true"
+        break
+      case "max_team_agents":
+        this.config.maxTeamAgents = Number(value)
         break
     }
   }

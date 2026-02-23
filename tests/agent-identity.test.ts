@@ -46,23 +46,23 @@ describe("ORCHESTRATOR_IDENTITY", () => {
   it('is named "Neo"', () => {
     expect(ORCHESTRATOR_IDENTITY.name).toBe("Neo")
     expect(ORCHESTRATOR_IDENTITY.code).toBe("NEO-01")
-    expect(ORCHESTRATOR_IDENTITY.emoji).toBe("🤖")
+    expect(ORCHESTRATOR_IDENTITY.emoji).toBe("◉")
   })
 })
 
 describe("formatIdentityHeader", () => {
   it("formats identity without extra", () => {
-    const id: AgentIdentity = { name: "Morpheus", code: "MRP-7X", emoji: "🔴" }
-    expect(formatIdentityHeader(id)).toBe("🔴 · Morpheus · MRP-7X")
+    const id: AgentIdentity = { name: "Morpheus", code: "MRP-7X", emoji: "◈" }
+    expect(formatIdentityHeader(id)).toBe("◈ · Morpheus · MRP-7X")
   })
 
   it("formats identity with extra info", () => {
-    const id: AgentIdentity = { name: "Trinity", code: "TRN-3K", emoji: "🟢" }
-    expect(formatIdentityHeader(id, "⏰ Job #5")).toBe("🟢 · Trinity · TRN-3K · ⏰ Job #5")
+    const id: AgentIdentity = { name: "Trinity", code: "TRN-3K", emoji: "◇" }
+    expect(formatIdentityHeader(id, "⏰ Job #5")).toBe("◇ · Trinity · TRN-3K · ⏰ Job #5")
   })
 
   it("formats orchestrator identity", () => {
     const header = formatIdentityHeader(ORCHESTRATOR_IDENTITY)
-    expect(header).toBe("🤖 · Neo · NEO-01")
+    expect(header).toBe("◉ · Neo · NEO-01")
   })
 })

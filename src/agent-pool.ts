@@ -1,9 +1,9 @@
 /**
  * Per-chat agent pool with master/worker model.
  *
- * All agents are pre-created at pool construction:
+ * Workers are created lazily on first acquire — no upfront allocation.
  *   - Slot 0 = master (Neo) — uses --resume for session continuity
- *   - Slots 1..N = workers — pre-created with fixed identities, refreshed memory on acquire
+ *   - Workers created on-demand up to maxConcurrentPerChat-1, then overflow
  */
 
 import { Agent } from "./agent"
@@ -28,37 +28,35 @@ interface AgentSlot {
 export class AgentPool {
   private masterSlot: AgentSlot
   private readonly workerSlots: AgentSlot[]
+  private readonly maxWorkers: number
   private readonly chatId: number
   private readonly config: AgentConfig
   private readonly db: Database
+  private overflowCounter: number = 0
 
   constructor(chatId: number, primary: Agent, config: AgentConfig, db: Database) {
     this.chatId = chatId
     this.config = config
     this.db = db
+    // Master agent: no tools (text-only), high effort for quality decisions
+    primary.disableTools = true
+    primary.effort = "high"
     this.masterSlot = { agent: primary, identity: ORCHESTRATOR_IDENTITY, busy: false }
+    this.maxWorkers = config.maxConcurrentPerChat - 1
 
-    // Pre-create worker agents (slots 1..maxConcurrent-1)
+    // Workers are created lazily — no upfront allocation
     this.workerSlots = []
-    for (let i = 1; i < config.maxConcurrentPerChat; i++) {
-      const worker = new Agent(config)
-      const identity = generateIdentity(i)
-      this.workerSlots.push({ agent: worker, identity, busy: false })
-    }
 
-    if (this.workerSlots.length > 0) {
-      const names = this.workerSlots.map((w) => `${w.identity.emoji} ${w.identity.name}`)
-      logger.info("Agent pool created", {
-        chatId,
-        master: `${ORCHESTRATOR_IDENTITY.emoji} ${ORCHESTRATOR_IDENTITY.name}`,
-        workers: names,
-      })
-    }
+    logger.info("Agent pool created", {
+      chatId,
+      master: `${ORCHESTRATOR_IDENTITY.emoji} ${ORCHESTRATOR_IDENTITY.name}`,
+      maxWorkers: this.maxWorkers,
+    })
   }
 
   /**
    * Acquire an agent for a call.
-   * Prefers master (Neo), then first free worker.
+   * Prefers master (Neo), then first free worker, then creates a new worker lazily.
    * Workers get fresh memory context from DB before each use.
    */
   acquire(): AcquireResult {
@@ -68,20 +66,36 @@ export class AgentPool {
       return { agent: this.masterSlot.agent, isOverflow: false, identity: ORCHESTRATOR_IDENTITY }
     }
 
-    // Find first free worker
+    // Find first free existing worker
     for (const slot of this.workerSlots) {
       if (!slot.busy) {
         slot.busy = true
         this.refreshWorkerMemory(slot.agent)
-        return { agent: slot.agent, isOverflow: true, identity: slot.identity }
+        return { agent: slot.agent, isOverflow: false, identity: slot.identity }
       }
     }
 
-    // All slots busy — shouldn't happen with correct semaphore, create temp overflow
+    // No free worker — create one lazily if under max
+    if (this.workerSlots.length < this.maxWorkers) {
+      const identity = generateIdentity(this.workerSlots.length + 1)
+      const worker = this.createWorker()
+      const slot: AgentSlot = { agent: worker, identity, busy: true }
+      this.workerSlots.push(slot)
+      this.refreshWorkerMemory(worker)
+      logger.info("Worker created on-demand", {
+        chatId: this.chatId,
+        worker: `${identity.emoji} ${identity.name}`,
+        poolSize: this.workerSlots.length,
+      })
+      return { agent: worker, isOverflow: false, identity }
+    }
+
+    // All slots busy and at max — create temp overflow
     logger.warn("All agent slots busy, creating temporary overflow", { chatId: this.chatId })
-    const tempAgent = new Agent(this.config)
+    const tempAgent = this.createWorker()
     this.refreshWorkerMemory(tempAgent)
-    const identity = generateIdentity(this.workerSlots.length + 1)
+    this.overflowCounter++
+    const identity = generateIdentity(this.maxWorkers + this.overflowCounter)
     return { agent: tempAgent, isOverflow: true, identity }
   }
 
@@ -91,24 +105,22 @@ export class AgentPool {
    */
   release(agent: Agent, isOverflow: boolean): void {
     if (!isOverflow) {
-      this.masterSlot.busy = false
-    } else {
-      // Check if it's a pre-created worker
-      let found = false
-      for (const slot of this.workerSlots) {
-        if (slot.agent === agent) {
-          slot.busy = false
-          agent.setSessionId(null)
-          found = true
-          break
+      // Could be master or a pre-created worker
+      if (agent === this.masterSlot.agent) {
+        this.masterSlot.busy = false
+      } else {
+        for (const slot of this.workerSlots) {
+          if (slot.agent === agent) {
+            slot.busy = false
+            agent.setSessionId(null)
+            break
+          }
         }
       }
-
+    } else {
       // Temporary overflow — clean up
-      if (!found) {
-        agent.cleanup()
-        logger.debug("Temporary overflow agent cleaned up", { chatId: this.chatId })
-      }
+      agent.cleanup()
+      logger.debug("Temporary overflow agent cleaned up", { chatId: this.chatId })
     }
 
     // Log when all agents are idle
@@ -116,6 +128,14 @@ export class AgentPool {
       const names = [this.masterSlot, ...this.workerSlots].map((s) => `${s.identity.emoji} ${s.identity.name}`)
       logger.info("All agents idle", { chatId: this.chatId, team: names })
     }
+  }
+
+  /** Create a worker agent — text-only output, no session persistence, no plugins. */
+  private createWorker(): Agent {
+    const worker = new Agent(this.config)
+    worker.disableTools = true
+    worker.workerMode = true
+    return worker
   }
 
   /** Refresh a worker's system prompt with full conversation context from DB. */
@@ -134,6 +154,8 @@ export class AgentPool {
   /** Replace the master agent (used on session reset). Cleans up the old agent. */
   setPrimary(agent: Agent): void {
     const old = this.masterSlot.agent
+    agent.disableTools = true
+    agent.effort = "high"
     this.masterSlot.agent = agent
     this.masterSlot.busy = false
     old.cleanup()
@@ -148,9 +170,14 @@ export class AgentPool {
     this.workerSlots.length = 0
   }
 
-  /** Number of pre-created worker agents */
+  /** Number of currently created worker agents */
   get workerCount(): number {
     return this.workerSlots.length
+  }
+
+  /** Maximum number of worker agents this pool can create */
+  get maxWorkerCapacity(): number {
+    return this.maxWorkers
   }
 
   /** Number of currently busy workers (not counting master) */
@@ -158,9 +185,13 @@ export class AgentPool {
     return this.workerSlots.filter((s) => s.busy).length
   }
 
-  /** Get all identities in the pool (for display) */
+  /** Get all identities in the pool (potential — includes uncreated workers) */
   getIdentities(): AgentIdentity[] {
-    return [ORCHESTRATOR_IDENTITY, ...this.workerSlots.map((s) => s.identity)]
+    const identities: AgentIdentity[] = [ORCHESTRATOR_IDENTITY]
+    for (let i = 1; i < this.config.maxConcurrentPerChat; i++) {
+      identities.push(generateIdentity(i))
+    }
+    return identities
   }
 
   /** Get status of all agent slots (for health monitor) */
@@ -169,5 +200,69 @@ export class AgentPool {
       master: { name: ORCHESTRATOR_IDENTITY.name, busy: this.masterSlot.busy },
       workers: this.workerSlots.map((s) => ({ name: s.identity.name, busy: s.busy })),
     }
+  }
+
+  /**
+   * Acquire N workers for parallel team execution.
+   * Reuses free existing workers, creates new ones lazily, then overflow.
+   * Never acquires the master — it's reserved for decomposition/synthesis.
+   */
+  acquireMultiple(count: number): AcquireResult[] {
+    const results: AcquireResult[] = []
+
+    for (let i = 0; i < count; i++) {
+      // Find first free existing worker
+      const slot = this.workerSlots.find((s) => !s.busy)
+      if (slot) {
+        slot.busy = true
+        this.refreshWorkerMemory(slot.agent)
+        results.push({ agent: slot.agent, isOverflow: false, identity: slot.identity })
+      } else if (this.workerSlots.length < this.maxWorkers) {
+        // Create new worker lazily
+        const identity = generateIdentity(this.workerSlots.length + 1)
+        const worker = this.createWorker()
+        const newSlot: AgentSlot = { agent: worker, identity, busy: true }
+        this.workerSlots.push(newSlot)
+        this.refreshWorkerMemory(worker)
+        logger.info("Worker created on-demand (team)", {
+          chatId: this.chatId,
+          worker: `${identity.emoji} ${identity.name}`,
+          poolSize: this.workerSlots.length,
+        })
+        results.push({ agent: worker, isOverflow: false, identity })
+      } else {
+        // Create temporary overflow agent
+        const temp = this.createWorker()
+        this.refreshWorkerMemory(temp)
+        this.overflowCounter++
+        const identity = generateIdentity(this.maxWorkers + this.overflowCounter)
+        results.push({ agent: temp, isOverflow: true, identity })
+      }
+    }
+
+    const names = results.map((r) => `${r.identity.emoji} ${r.identity.name}`)
+    logger.info("Team agents acquired", { chatId: this.chatId, count: results.length, agents: names })
+
+    return results
+  }
+
+  /**
+   * Release all agents acquired via acquireMultiple().
+   * Pre-created workers are returned to the pool; overflow agents are destroyed.
+   */
+  releaseMultiple(agents: AcquireResult[]): void {
+    for (const { agent, isOverflow } of agents) {
+      if (!isOverflow) {
+        const slot = this.workerSlots.find((s) => s.agent === agent)
+        if (slot) {
+          slot.busy = false
+          agent.setSessionId(null)
+        }
+      } else {
+        agent.cleanup()
+      }
+    }
+
+    logger.info("Team agents released", { chatId: this.chatId, count: agents.length })
   }
 }

@@ -52,7 +52,7 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config
-    this.sandboxDir = createSandbox()
+    this.sandboxDir = createSandbox(config.collaboration)
   }
 
   /** List user-created files in the sandbox (excludes CLAUDE.md) */
@@ -94,6 +94,18 @@ export class Agent {
   }
 
   private overrideSystemPrompt: string | undefined | null = null
+
+  /** When true, passes `--tools ""` to disable all tool use (text-only output). */
+  disableTools: boolean = false
+
+  /** When set, passes `--allowed-tools` to restrict tool access (e.g. "Bash Read Write Edit"). */
+  allowedTools: string | null = null
+
+  /** When true, passes `--no-session-persistence` and `--disable-slash-commands` (worker mode). */
+  workerMode: boolean = false
+
+  /** Effort level: "low", "medium", "high". Null = CLI default. */
+  effort: "low" | "medium" | "high" | null = null
 
   /** Send a text prompt with retry + timeout. */
   async call(prompt: string): Promise<AgentCallResult> {
@@ -151,9 +163,11 @@ export class Agent {
 
   /** Spawn claude CLI for a plain text prompt (direct or Docker). */
   private async spawnText(prompt: string): Promise<AgentCallResult> {
-    logger.debug("Spawning claude (text)", {
+    logger.info("Agent spawning CLI", {
       mode: this.config.useDocker ? "docker" : "direct",
       hasSession: !!this.sessionId,
+      sessionId: this.sessionId?.slice(0, 16) ?? null,
+      promptPreview: prompt.slice(0, 120),
       promptLength: prompt.length,
     })
 
@@ -409,18 +423,29 @@ export class Agent {
 
     if (exitCode !== 0) {
       const errorMsg = stderrText.trim() || `claude exited with code ${exitCode}`
-      logger.error("Claude process failed", { exitCode, error: errorMsg })
+      logger.error("Claude process failed", { exitCode, error: errorMsg, durationMs })
       throw new Error(errorMsg)
     }
 
-    return { ...this.parseResponse(rawStdout), durationMs }
+    const result = { ...this.parseResponse(rawStdout), durationMs }
+    logger.info("Agent call completed", {
+      sessionId: this.sessionId?.slice(0, 16) ?? null,
+      durationMs,
+      resultLength: result.text.length,
+      tokens: result.tokenUsage ? `${result.tokenUsage.inputTokens}in/${result.tokenUsage.outputTokens}out` : null,
+    })
+    return result
   }
 
   buildArgs(inlinePrompt: string | null, outputFormat: "json" | "stream-json" = "json"): string[] {
-    const args = ["claude", "--print", "--model", "opus", "--output-format", outputFormat]
+    const args = ["claude", "--print", "--output-format", outputFormat]
     if (outputFormat === "stream-json") args.push("--verbose")
     if (this.config.mcpConfigPath) args.push("--mcp-config", this.config.mcpConfigPath)
     if (this.config.skipPermissions) args.push("--dangerously-skip-permissions")
+    if (this.disableTools) args.push("--tools", "")
+    else if (this.allowedTools) args.push("--allowed-tools", this.allowedTools)
+    if (this.workerMode) args.push("--no-session-persistence", "--disable-slash-commands")
+    if (this.effort) args.push("--effort", this.effort)
     // Use agent-local override if set, otherwise fall back to shared config
     const effectivePrompt = this.overrideSystemPrompt !== null ? this.overrideSystemPrompt : this.config.systemPrompt
     if (this.sessionId) {
@@ -428,7 +453,14 @@ export class Agent {
     } else if (effectivePrompt) {
       args.push("--system-prompt", effectivePrompt)
     }
-    if (inlinePrompt !== null) args.push(inlinePrompt)
+    logger.debug("CLI args built", {
+      argCount: args.length,
+      systemPromptLength: effectivePrompt?.length ?? 0,
+      hasSession: !!this.sessionId,
+      hasPrompt: inlinePrompt !== null,
+      disableTools: this.disableTools,
+    })
+    if (inlinePrompt !== null) args.push("-p", inlinePrompt)
     return args
   }
 

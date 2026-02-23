@@ -154,7 +154,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       const date = new Date(msg.timestamp).toLocaleString("en-US", { timeZone: "Europe/Rome" })
       lines.push(`## 👤 User — ${date}`)
       lines.push("", msg.prompt, "")
-      lines.push(`## 🤖 Claude — ${(msg.duration_ms / 1000).toFixed(1)}s`)
+      lines.push(`## ◉ Neo — ${(msg.duration_ms / 1000).toFixed(1)}s`)
       lines.push("", msg.response, "")
       lines.push("---", "")
     }
