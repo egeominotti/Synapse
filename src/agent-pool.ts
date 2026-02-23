@@ -38,8 +38,7 @@ export class AgentPool {
     this.chatId = chatId
     this.config = config
     this.db = db
-    // Master agent: WebSearch only, high effort for quality decisions
-    primary.allowedTools = "WebSearch"
+    // Master agent: all tools enabled, high effort for quality decisions
     primary.effort = "high"
     this.masterSlot = { agent: primary, identity: ORCHESTRATOR_IDENTITY, busy: false }
     this.maxWorkers = config.maxConcurrentPerChat - 1
@@ -130,10 +129,9 @@ export class AgentPool {
     }
   }
 
-  /** Create a worker agent — WebSearch only, no session persistence, no plugins. */
+  /** Create a worker agent — all tools, no session persistence, no plugins. */
   private createWorker(): Agent {
     const worker = new Agent(this.config)
-    worker.allowedTools = "WebSearch"
     worker.workerMode = true
     return worker
   }
@@ -154,7 +152,6 @@ export class AgentPool {
   /** Replace the master agent (used on session reset). Cleans up the old agent. */
   setPrimary(agent: Agent): void {
     const old = this.masterSlot.agent
-    agent.allowedTools = "WebSearch"
     agent.effort = "high"
     this.masterSlot.agent = agent
     this.masterSlot.busy = false
