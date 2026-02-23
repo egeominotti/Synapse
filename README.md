@@ -36,15 +36,46 @@
 
 > **Bun is required.** Install it from [bun.sh](https://bun.sh) — Node.js is not supported.
 
+### 1. Install dependencies
+
 ```bash
-# Install
 bun install
+```
 
-# Configure
+### 2. Get your Claude Code OAuth token
+
+Synapse uses the Claude Code CLI under the hood. You need an OAuth token to authenticate:
+
+```bash
+# If you haven't installed Claude Code yet:
+npm install -g @anthropic-ai/claude-code
+
+# Generate your OAuth token:
+claude setup-token
+```
+
+This will open a browser for authentication and output a token. Copy it — you'll need it in the next step.
+
+### 3. Configure environment
+
+```bash
 cp .env.example .env
-# Edit .env with your tokens
+```
 
-# Run
+Edit `.env` and add your tokens:
+
+```env
+CLAUDE_CODE_OAUTH_TOKEN=<your-token-from-step-2>
+TELEGRAM_BOT_TOKEN=<token-from-@BotFather>
+TELEGRAM_ADMIN_ID=<your-telegram-chat-id>
+
+# Optional: voice transcription
+GROQ_API_KEY=<your-groq-api-key>
+```
+
+### 4. Run
+
+```bash
 bun run run.ts
 ```
 
