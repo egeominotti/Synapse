@@ -1,5 +1,5 @@
 /**
- * Agent identity generator — Matrix-themed names, codes, and colors.
+ * Agent identity generator — neuroscience-themed names, codes, and symbols.
  * Used to visually distinguish the orchestrator from scheduled job agents.
  */
 
@@ -9,27 +9,27 @@ export interface AgentIdentity {
   emoji: string
 }
 
-const MATRIX_NAMES = [
-  "Morpheus",
-  "Trinity",
-  "Tank",
-  "Dozer",
-  "Switch",
-  "Apoc",
-  "Mouse",
-  "Niobe",
-  "Ghost",
-  "Seraph",
-  "Link",
-  "Zee",
-  "Sati",
-  "Rama",
-  "Sparks",
-  "Lock",
-  "Ajax",
-  "Vector",
-  "Cipher",
-  "Mifune",
+const NEURON_NAMES = [
+  "Axon",
+  "Dendrite",
+  "Cortex",
+  "Neuron",
+  "Thalamus",
+  "Nucleus",
+  "Receptor",
+  "Ganglia",
+  "Myelin",
+  "Plexus",
+  "Medulla",
+  "Sulcus",
+  "Gyrus",
+  "Limbic",
+  "Ventricle",
+  "Chiasma",
+  "Fornix",
+  "Putamen",
+  "Amygdala",
+  "Cerebrum",
 ]
 
 const COLOR_EMOJIS = ["◈", "◇", "△", "▽", "◎", "▣"]
@@ -50,7 +50,7 @@ function randomAlphaNum(len: number): string {
  * Code includes random suffix for uniqueness.
  */
 export function generateIdentity(jobId: number): AgentIdentity {
-  const name = MATRIX_NAMES[jobId % MATRIX_NAMES.length]
+  const name = NEURON_NAMES[jobId % NEURON_NAMES.length]
   const emoji = COLOR_EMOJIS[jobId % COLOR_EMOJIS.length]
   const prefix = name.slice(0, 3).toUpperCase()
   const code = `${prefix}-${randomAlphaNum(2)}`

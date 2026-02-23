@@ -316,9 +316,9 @@ bot.start({
       const globalStats = db.getAllStats()
       for (const chatId of knownChatIds) {
         const msg =
-          `<code>⚡ Synapse online</code>\n` +
+          `<code>🧠 Synapse online</code>\n` +
           `<code>Neural pathways connected.</code>\n` +
-          `<code>All systems operational.</code>\n\n` +
+          `<code>Axons firing. Dendrites listening.</code>\n\n` +
           `<code>` +
           `> system.boot()\n` +
           `> agent:    @${info.username}\n` +
@@ -336,7 +336,7 @@ bot.start({
           `> retry:    ${agentConfig.maxRetries}x\n` +
           `> status:   ONLINE` +
           `</code>\n\n` +
-          `<i>Synapse is ready.</i>`
+          `<i>⚡ Synapse is ready.</i>`
         bot.api.sendMessage(chatId, msg, { parse_mode: "HTML" }).catch(() => {})
       }
     }

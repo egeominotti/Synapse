@@ -13,7 +13,7 @@ Synapse is a Claude AI agent platform with REPL and Telegram bot interfaces. It 
 - **Database**: SQLite via `bun:sqlite` (WAL mode)
 - **Telegram**: grammy v1.40+
 - **Logging**: pino + pino-pretty (structured, stderr only)
-- **Scheduler**: croner (zero-dep cron with second-level precision)
+- **Scheduler**: bunqueue (MCP-based job scheduling for all agents)
 - **Voice**: Groq API (primary) + whisper-cli local (fallback), whisper-large-v3-turbo
 - **Testing**: bun:test (362 tests, 21 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
@@ -39,14 +39,14 @@ Database (src/db.ts)                 SQLite — sessions, messages, attachments,
         ▲                            telegram_sessions, runtime_config, scheduled_jobs
    ┌────┼────────┐
    ▼    ▼        ▼
-RuntimeConfig  ChatQueue  Scheduler  Config + semaphore queue + croner scheduler
+RuntimeConfig  ChatQueue  Scheduler  Config + semaphore queue + bunqueue scheduler
 
 Semaphore (src/semaphore.ts)         Counting semaphore for per-chat concurrency
 Whisper (src/whisper.ts)             Groq API (primary) + whisper-cli local (fallback)
 HealthMonitor (src/health.ts)        System stability checks every 30s with Telegram alerts
 Sandbox (src/sandbox.ts)             Isolated /tmp dirs with safety rules per agent
 Memory (src/memory.ts)               Conversation context builder for worker agents
-McpConfig (src/mcp-config.ts)        MCP server configuration (disabled — startup overhead)
+McpConfig (src/mcp-config.ts)        MCP server configuration (bunqueue for all agents)
 Orchestrator (src/orchestrator.ts)   Auto-team: detect decomposition, execute workers, synthesize
 ```
 
@@ -64,14 +64,14 @@ src/
   health.ts             → Health monitor: DB, Groq, whisper, memory checks (204 lines)
   sandbox.ts            → Sandbox creation, safety rules, spawn env caching (307 lines)
   memory.ts             → Conversation memory context builder (89 lines)
-  mcp-config.ts         → MCP server configuration (disabled — startup overhead) (78 lines)
+  mcp-config.ts         → MCP server configuration (bunqueue for all agents) (78 lines)
   db-core.ts            → Database base class: schema, sessions, messages, attachments (448 lines)
   db.ts                 → Database extends core: Telegram sessions, config, jobs (201 lines)
   chat-queue.ts         → Per-chat message queue with semaphore concurrency (56 lines)
   config.ts             → Env-based configuration with range validation (61 lines)
   formatter.ts          → Markdown → Telegram HTML converter + smart chunking (252 lines)
   runtime-config.ts     → Runtime configuration manager for Telegram /config (270 lines)
-  scheduler.ts          → Job scheduler: croner-powered, once/recurring/delay/cron (322 lines)
+  scheduler.ts          → Job scheduler: bunqueue-powered, once/recurring/delay/cron (322 lines)
   whisper.ts            → Speech-to-text: Groq API primary + local whisper-cli fallback (199 lines)
   history.ts            → Session & message persistence (136 lines)
   repl.ts               → Interactive terminal with slash commands (282 lines)

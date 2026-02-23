@@ -52,13 +52,13 @@ describe("ORCHESTRATOR_IDENTITY", () => {
 
 describe("formatIdentityHeader", () => {
   it("formats identity without extra", () => {
-    const id: AgentIdentity = { name: "Morpheus", code: "MRP-7X", emoji: "◈" }
-    expect(formatIdentityHeader(id)).toBe("◈ · Morpheus · MRP-7X")
+    const id: AgentIdentity = { name: "Axon", code: "AXO-7X", emoji: "◈" }
+    expect(formatIdentityHeader(id)).toBe("◈ · Axon · AXO-7X")
   })
 
   it("formats identity with extra info", () => {
-    const id: AgentIdentity = { name: "Trinity", code: "TRN-3K", emoji: "◇" }
-    expect(formatIdentityHeader(id, "⏰ Job #5")).toBe("◇ · Trinity · TRN-3K · ⏰ Job #5")
+    const id: AgentIdentity = { name: "Dendrite", code: "DEN-3K", emoji: "◇" }
+    expect(formatIdentityHeader(id, "⏰ Job #5")).toBe("◇ · Dendrite · DEN-3K · ⏰ Job #5")
   })
 
   it("formats orchestrator identity", () => {

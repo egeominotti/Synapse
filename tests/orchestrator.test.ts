@@ -281,7 +281,7 @@ describe("buildSynthesizePrompt", () => {
       }),
     ]
     const prompt = buildSynthesizePrompt("test", results)
-    expect(prompt).toContain("Trinity") // generateIdentity(1)
-    expect(prompt).toContain("Tank") // generateIdentity(2)
+    expect(prompt).toContain("Dendrite") // generateIdentity(1)
+    expect(prompt).toContain("Cortex") // generateIdentity(2)
   })
 })
