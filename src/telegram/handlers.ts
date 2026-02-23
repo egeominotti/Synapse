@@ -293,11 +293,15 @@ async function executeWithRetry(
 
     if (!isOverflow && isSessionError(msg)) {
       logger.info("Stale session, resetting with fresh agent", { chatId })
+      let freshAgent: Agent | null = null
       try {
-        const freshAgent = resetAgentSession(chatId, deps)
+        freshAgent = resetAgentSession(chatId, deps)
         pool.setPrimary(freshAgent)
-        await execute(freshAgent)
+        freshAgent = null // now owned by pool — don't cleanup on error
+        await execute(pool.getPrimary())
       } catch (retryErr) {
+        // Clean up freshAgent if it was created but never handed to the pool
+        freshAgent?.cleanup()
         const retryMsg = retryErr instanceof Error ? retryErr.message : String(retryErr)
         logger.error("Retry with fresh session also failed", { chatId, error: retryMsg })
         if (statusMsgId) {
@@ -511,6 +515,15 @@ async function handleAutoTeam(
       if (statusMsgId) {
         await editStatus(ctx, chatId, statusMsgId, "✗ Synthesis failed.")
       }
+      // Record the failure in history so it's not lost
+      const history = deps.getHistory(chatId, master)
+      await history.addMessage({
+        timestamp: new Date().toISOString(),
+        prompt: `[auto-team] ${originalPrompt}`,
+        response: `[synthesis failed] ${successCount}/${subtasks.length} agents succeeded but synthesis returned no result.`,
+        durationMs: Math.round(performance.now() - startTime),
+        tokenUsage: null,
+      })
       return
     }
 

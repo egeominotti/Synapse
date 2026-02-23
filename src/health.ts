@@ -38,6 +38,7 @@ export interface HealthMonitorDeps {
 export class HealthMonitor {
   private previous: HealthStatus | null = null
   private running = false
+  private wakeUp: (() => void) | null = null
 
   constructor(
     private deps: HealthMonitorDeps,
@@ -74,9 +75,11 @@ export class HealthMonitor {
     this.loop(intervalMs)
   }
 
-  /** Stop the health check loop. */
+  /** Stop the health check loop. Interrupts any pending sleep immediately. */
   stop(): void {
     this.running = false
+    this.wakeUp?.()
+    this.wakeUp = null
   }
 
   // ---------------------------------------------------------------------------
@@ -191,7 +194,13 @@ export class HealthMonitor {
       } catch (err) {
         logger.error("Health check loop error", { error: String(err) })
       }
-      await Bun.sleep(intervalMs)
+      // Interruptible sleep — stop() resolves the wake promise, breaking out immediately
+      await Promise.race([
+        Bun.sleep(intervalMs),
+        new Promise<void>((resolve) => {
+          this.wakeUp = resolve
+        }),
+      ])
     }
   }
 }

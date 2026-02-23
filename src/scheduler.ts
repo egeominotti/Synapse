@@ -23,6 +23,7 @@ const MS_PER_MINUTE = 60_000
 const MS_PER_HOUR = 3_600_000
 const MS_PER_DAY = 86_400_000
 const MIN_INTERVAL_MS = 30_000 // minimum recurring interval: 30 seconds
+const JOB_TIMEOUT_MS = 5 * 60_000 // 5 minute hard timeout per job execution
 
 export interface ScheduleSpec {
   type: "once" | "recurring" | "delay" | "cron"
@@ -266,27 +267,40 @@ export class Scheduler {
       if (runAt.getTime() <= Date.now()) {
         // Past due — fire immediately, then deactivate
         logger.debug("Job past due, firing immediately", { jobId: job.id })
-        void this.executeJob(job).finally(() => {
-          if (isOneShot) this.db.markJobDone(job.id)
-        })
+        void this.executeJob(job)
+          .finally(() => {
+            if (isOneShot) this.db.markJobDone(job.id)
+          })
+          .catch((err) => {
+            logger.error("Past-due job execution failed", { jobId: job.id, error: String(err) })
+          })
         return
       }
 
       const cron = new Cron(runAt, { maxRuns: 1, catch: true }, () => {
-        void this.executeJob(job).finally(() => {
-          this.db.markJobDone(job.id)
-          this.cronJobs.delete(job.id)
-        })
+        void this.executeJob(job)
+          .finally(() => {
+            this.db.markJobDone(job.id)
+            this.cronJobs.delete(job.id)
+          })
+          .catch((err) => {
+            logger.error("One-shot job execution failed", { jobId: job.id, error: String(err) })
+          })
       })
       this.cronJobs.set(job.id, cron)
       logger.debug("One-shot job scheduled", { jobId: job.id, runAt: job.run_at })
     }
   }
 
-  /** Execute a single job with failure tracking. */
+  /** Execute a single job with failure tracking and timeout. */
   private async executeJob(job: { id: number; chat_id: number; prompt: string; schedule_type: string }): Promise<void> {
     try {
-      await this.executor({ jobId: job.id, chatId: job.chat_id, prompt: job.prompt })
+      // Race execution against a hard timeout to prevent hanging jobs from blocking the scheduler
+      const execution = this.executor({ jobId: job.id, chatId: job.chat_id, prompt: job.prompt })
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Job #${job.id} timed out after ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS)
+      )
+      await Promise.race([execution, timeout])
       this.failureCounts.delete(job.id)
       this.db.updateJobLastRun(job.id)
       logger.info("Job executed", { jobId: job.id, chatId: job.chat_id, type: job.schedule_type })

@@ -118,7 +118,13 @@ function getAgentPool(chatId: number): AgentPool {
     evicted?.cleanup()
     agentPools.delete(oldestKey)
     histories.delete(oldestKey)
-    logger.debug("Agent pool evicted (LRU)", { evictedChatId: oldestKey, mapSize: agentPools.size })
+    // Cancel any scheduled jobs for the evicted chat to prevent orphan executions
+    const cancelledJobs = scheduler.cancelAllJobs(oldestKey)
+    logger.debug("Agent pool evicted (LRU)", {
+      evictedChatId: oldestKey,
+      mapSize: agentPools.size,
+      cancelledJobs,
+    })
   }
 
   const pool = new AgentPool(chatId, agent, agentConfig, db)

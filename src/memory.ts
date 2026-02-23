@@ -40,8 +40,8 @@ export function buildMemoryContext(messages: MemoryMessage[]): string | null {
 
   for (const msg of messages) {
     const date = msg.timestamp.slice(0, 10)
-    const response =
-      msg.response.length > MAX_RESPONSE_PREVIEW ? msg.response.slice(0, MAX_RESPONSE_PREVIEW) + "..." : msg.response
+    const resp = msg.response ?? ""
+    const response = resp.length > MAX_RESPONSE_PREVIEW ? resp.slice(0, MAX_RESPONSE_PREVIEW) + "..." : resp
 
     const entry = `[${date}] User: ${msg.prompt}\nAssistant: ${response}\n`
 
@@ -75,7 +75,7 @@ export function buildFullConversationContext(messages: MemoryMessage[]): string 
   let totalChars = lines.join("\n").length
 
   for (const msg of messages) {
-    const entry = `User: ${msg.prompt}\nAssistant: ${msg.response}\n`
+    const entry = `User: ${msg.prompt}\nAssistant: ${msg.response ?? ""}\n`
 
     if (totalChars + entry.length > MAX_FULL_CONTEXT_CHARS) break
 
