@@ -195,7 +195,7 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
     "You have access to bunqueue MCP tools for scheduling jobs. Use them when users ask",
     "to be reminded, schedule tasks, or set up recurring actions.",
     "",
-    "**Queue name:** `neo-jobs`",
+    "**Queue name:** `synapse-jobs`",
     "",
     "**Job data format (MUST include these fields):**",
     "```json",
@@ -209,7 +209,7 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
     "- `bunqueue_delete_cron` — remove a cron schedule",
     "",
     "**Examples:**",
-    '- "remind me in 5 minutes" → `bunqueue_add_job` with queue `neo-jobs`, delay 300000',
+    '- "remind me in 5 minutes" → `bunqueue_add_job` with queue `synapse-jobs`, delay 300000',
     '- "every day at 9am" → `bunqueue_add_cron` with pattern `0 9 * * *`',
     "",
     `**IMPORTANT:** Always set chatId to \`${chatId ?? 0}\` in the job data so results are sent to the correct chat.`,
@@ -228,7 +228,7 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
 
 /** Create an isolated sandbox directory with safety rules. Returns the path. */
 export function createSandbox(collaboration: boolean = true, chatId?: number): string {
-  const sandboxDir = mkdtempSync(join(tmpdir(), "neo-agent-"))
+  const sandboxDir = mkdtempSync(join(tmpdir(), "synapse-agent-"))
   writeFileSync(join(sandboxDir, "CLAUDE.md"), generateSandboxRules(sandboxDir, collaboration, chatId))
   return sandboxDir
 }

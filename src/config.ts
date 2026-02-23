@@ -10,7 +10,7 @@ import { homedir } from "os"
 const DEFAULT_TIMEOUT_MS = 0 // 0 = no timeout
 const DEFAULT_MAX_RETRIES = 3
 const DEFAULT_INITIAL_RETRY_DELAY_MS = 1_000
-const DEFAULT_DB_PATH = join(homedir(), ".claude-agent", "neo.db")
+const DEFAULT_DB_PATH = join(homedir(), ".claude-agent", "synapse.db")
 
 function getRequiredEnv(key: string): string {
   const value = Bun.env[key]

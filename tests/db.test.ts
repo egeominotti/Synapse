@@ -8,7 +8,7 @@ let db: Database
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "neo-test-"))
+  tmpDir = mkdtempSync(join(tmpdir(), "synapse-test-"))
   db = new Database(join(tmpDir, "test.db"))
 })
 

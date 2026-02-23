@@ -28,7 +28,7 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "neo-rc-"))
+  tmpDir = mkdtempSync(join(tmpdir(), "synapse-rc-"))
   db = new Database(join(tmpDir, "test.db"))
 })
 

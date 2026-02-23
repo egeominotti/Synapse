@@ -44,7 +44,7 @@ describe("loadConfig", () => {
     expect(config.timeoutMs).toBe(0) // 0 = no timeout
     expect(config.maxRetries).toBe(3)
     expect(config.initialRetryDelayMs).toBe(1_000)
-    expect(config.dbPath).toBe(join(homedir(), ".claude-agent", "neo.db"))
+    expect(config.dbPath).toBe(join(homedir(), ".claude-agent", "synapse.db"))
     expect(config.skipPermissions).toBe(true)
     expect(config.useDocker).toBe(false)
     expect(config.dockerImage).toBe("claude-agent:latest")

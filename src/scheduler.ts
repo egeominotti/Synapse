@@ -21,7 +21,7 @@ export type JobProcessor = (data: ScheduledJobData) => Promise<string>
 /** Callback to notify a chat (send the result to Telegram) */
 export type JobNotifier = (chatId: number, text: string) => Promise<void>
 
-const QUEUE_NAME = "neo-jobs"
+const QUEUE_NAME = "synapse-jobs"
 
 export class Scheduler {
   private worker: Worker<ScheduledJobData, string> | null = null

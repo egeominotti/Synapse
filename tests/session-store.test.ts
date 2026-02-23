@@ -10,7 +10,7 @@ let store: SessionStore
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "neo-store-"))
+  tmpDir = mkdtempSync(join(tmpdir(), "synapse-store-"))
   db = new Database(join(tmpDir, "test.db"))
   store = new SessionStore(db)
 })

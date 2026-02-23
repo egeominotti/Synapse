@@ -1,15 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300" fill="none">
   <defs>
     <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00ff41"/>
-      <stop offset="50%" stop-color="#00cc33"/>
-      <stop offset="100%" stop-color="#00ff41"/>
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
     </linearGradient>
 
     <linearGradient id="textGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#00ff41"/>
-      <stop offset="50%" stop-color="#33ff77"/>
-      <stop offset="100%" stop-color="#00ff41"/>
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="40%" stop-color="#a78bfa"/>
+      <stop offset="100%" stop-color="#c4b5fd"/>
+    </linearGradient>
+
+    <linearGradient id="nodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#a78bfa"/>
     </linearGradient>
 
     <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
@@ -19,60 +24,49 @@
 
     <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/>
-      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0  0 0.8 0 0 0  0 0 0 0 0.25  0 0 0 0.4 0"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.38  0 0 0 0 0.36  0 0 0 0 0.95  0 0 0 0.4 0"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <filter id="pulseGlow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.51  0 0 0 0 0.36  0 0 0 0 0.96  0 0 0 0.25 0"/>
       <feComposite in="SourceGraphic" in2="blur" operator="over"/>
     </filter>
   </defs>
 
   <!-- Background -->
-  <rect width="800" height="300" rx="16" fill="#0a0a0a"/>
+  <rect width="800" height="300" rx="16" fill="#0c0a1a"/>
 
-  <!-- Subtle matrix rain columns -->
-  <g opacity="0.06" font-family="'Courier New', monospace" font-size="11" fill="#00ff41">
-    <text x="30" y="30">01001</text>
-    <text x="30" y="50">11010</text>
-    <text x="30" y="70">00101</text>
-    <text x="30" y="90">10110</text>
-    <text x="30" y="110">01101</text>
-    <text x="30" y="130">11001</text>
-    <text x="30" y="150">00110</text>
-    <text x="30" y="170">10011</text>
-    <text x="30" y="190">01110</text>
-    <text x="30" y="210">11100</text>
-    <text x="30" y="230">01001</text>
-    <text x="30" y="250">10010</text>
-    <text x="30" y="270">11010</text>
-    <text x="30" y="290">00101</text>
-
-    <text x="730" y="25">10110</text>
-    <text x="730" y="45">01001</text>
-    <text x="730" y="65">11010</text>
-    <text x="730" y="85">00101</text>
-    <text x="730" y="105">10011</text>
-    <text x="730" y="125">01110</text>
-    <text x="730" y="145">11001</text>
-    <text x="730" y="165">00110</text>
-    <text x="730" y="185">10101</text>
-    <text x="730" y="205">01100</text>
-    <text x="730" y="225">11011</text>
-    <text x="730" y="245">00101</text>
-    <text x="730" y="265">10110</text>
-    <text x="730" y="285">01001</text>
+  <!-- Subtle dot grid -->
+  <g opacity="0.04" fill="#818cf8">
+    <circle cx="40" cy="40" r="1.2"/>  <circle cx="80" cy="40" r="1.2"/>  <circle cx="120" cy="40" r="1.2"/>
+    <circle cx="40" cy="80" r="1.2"/>  <circle cx="80" cy="80" r="1.2"/>  <circle cx="120" cy="80" r="1.2"/>
+    <circle cx="40" cy="120" r="1.2"/> <circle cx="80" cy="120" r="1.2"/> <circle cx="120" cy="120" r="1.2"/>
+    <circle cx="40" cy="160" r="1.2"/> <circle cx="80" cy="160" r="1.2"/> <circle cx="120" cy="160" r="1.2"/>
+    <circle cx="40" cy="200" r="1.2"/> <circle cx="80" cy="200" r="1.2"/> <circle cx="120" cy="200" r="1.2"/>
+    <circle cx="40" cy="240" r="1.2"/> <circle cx="80" cy="240" r="1.2"/> <circle cx="120" cy="240" r="1.2"/>
+    <circle cx="680" cy="40" r="1.2"/> <circle cx="720" cy="40" r="1.2"/> <circle cx="760" cy="40" r="1.2"/>
+    <circle cx="680" cy="80" r="1.2"/> <circle cx="720" cy="80" r="1.2"/> <circle cx="760" cy="80" r="1.2"/>
+    <circle cx="680" cy="120" r="1.2"/><circle cx="720" cy="120" r="1.2"/><circle cx="760" cy="120" r="1.2"/>
+    <circle cx="680" cy="160" r="1.2"/><circle cx="720" cy="160" r="1.2"/><circle cx="760" cy="160" r="1.2"/>
+    <circle cx="680" cy="200" r="1.2"/><circle cx="720" cy="200" r="1.2"/><circle cx="760" cy="200" r="1.2"/>
+    <circle cx="680" cy="240" r="1.2"/><circle cx="720" cy="240" r="1.2"/><circle cx="760" cy="240" r="1.2"/>
   </g>
 
   <!-- Hexagon icon -->
   <g transform="translate(0, 52)">
     <!-- Hex outer glow -->
     <polygon points="130,18 210,58 210,138 130,178 50,138 50,58"
-             fill="none" stroke="#00ff41" stroke-width="2" opacity="0.15"
+             fill="none" stroke="#818cf8" stroke-width="2" opacity="0.15"
              filter="url(#softGlow)"/>
 
     <!-- Hex border -->
     <polygon points="130,18 210,58 210,138 130,178 50,138 50,58"
-             fill="#0d1a0f" stroke="#00ff41" stroke-width="2.5" opacity="0.9"/>
+             fill="#0e0c20" stroke="#818cf8" stroke-width="2.5" opacity="0.9"/>
 
     <!-- Inner circuit lines -->
-    <g stroke="#00ff41" stroke-width="1" opacity="0.2">
+    <g stroke="#818cf8" stroke-width="1" opacity="0.15">
       <line x1="90" y1="58" x2="170" y2="58"/>
       <line x1="80" y1="78" x2="180" y2="78"/>
       <line x1="75" y1="98" x2="185" y2="98"/>
@@ -80,88 +74,100 @@
       <line x1="90" y1="138" x2="170" y2="138"/>
     </g>
 
-    <!-- Brain/AI neural network icon -->
+    <!-- Neural network / synapse icon -->
     <g filter="url(#neonGlow)">
-      <!-- Central node -->
-      <circle cx="130" cy="98" r="8" fill="#00ff41" opacity="0.9"/>
-      <circle cx="130" cy="98" r="4" fill="#0a0a0a"/>
+      <!-- Central node (larger, brighter — the synapse core) -->
+      <circle cx="130" cy="98" r="10" fill="url(#nodeGrad)" opacity="0.95"/>
+      <circle cx="130" cy="98" r="5" fill="#0c0a1a"/>
+      <circle cx="130" cy="98" r="3" fill="#a78bfa" opacity="0.6"/>
 
       <!-- Top nodes -->
-      <circle cx="108" cy="62" r="5" fill="#00ff41" opacity="0.7"/>
-      <circle cx="152" cy="62" r="5" fill="#00ff41" opacity="0.7"/>
+      <circle cx="105" cy="58" r="5.5" fill="url(#nodeGrad)" opacity="0.75"/>
+      <circle cx="155" cy="58" r="5.5" fill="url(#nodeGrad)" opacity="0.75"/>
 
       <!-- Mid nodes -->
-      <circle cx="85" cy="88" r="5" fill="#00ff41" opacity="0.7"/>
-      <circle cx="175" cy="88" r="5" fill="#00ff41" opacity="0.7"/>
-      <circle cx="85" cy="112" r="5" fill="#00ff41" opacity="0.7"/>
-      <circle cx="175" cy="112" r="5" fill="#00ff41" opacity="0.7"/>
+      <circle cx="82" cy="85" r="5" fill="url(#nodeGrad)" opacity="0.7"/>
+      <circle cx="178" cy="85" r="5" fill="url(#nodeGrad)" opacity="0.7"/>
+      <circle cx="82" cy="115" r="5" fill="url(#nodeGrad)" opacity="0.7"/>
+      <circle cx="178" cy="115" r="5" fill="url(#nodeGrad)" opacity="0.7"/>
 
       <!-- Bottom nodes -->
-      <circle cx="108" cy="138" r="5" fill="#00ff41" opacity="0.7"/>
-      <circle cx="152" cy="138" r="5" fill="#00ff41" opacity="0.7"/>
+      <circle cx="105" cy="140" r="5.5" fill="url(#nodeGrad)" opacity="0.75"/>
+      <circle cx="155" cy="140" r="5.5" fill="url(#nodeGrad)" opacity="0.75"/>
 
-      <!-- Neural connections -->
-      <g stroke="#00ff41" stroke-width="1.5" opacity="0.5">
-        <line x1="130" y1="98" x2="108" y2="62"/>
-        <line x1="130" y1="98" x2="152" y2="62"/>
-        <line x1="130" y1="98" x2="85" y2="88"/>
-        <line x1="130" y1="98" x2="175" y2="88"/>
-        <line x1="130" y1="98" x2="85" y2="112"/>
-        <line x1="130" y1="98" x2="175" y2="112"/>
-        <line x1="130" y1="98" x2="108" y2="138"/>
-        <line x1="130" y1="98" x2="152" y2="138"/>
-
-        <line x1="108" y1="62" x2="85" y2="88"/>
-        <line x1="152" y1="62" x2="175" y2="88"/>
-        <line x1="85" y1="112" x2="108" y2="138"/>
-        <line x1="175" y1="112" x2="152" y2="138"/>
-        <line x1="108" y1="62" x2="152" y2="62"/>
-        <line x1="108" y1="138" x2="152" y2="138"/>
-        <line x1="85" y1="88" x2="85" y2="112"/>
-        <line x1="175" y1="88" x2="175" y2="112"/>
+      <!-- Synaptic connections (curved paths for organic feel) -->
+      <g stroke="url(#nodeGrad)" stroke-width="1.8" opacity="0.45" fill="none">
+        <!-- Central hub connections -->
+        <path d="M130,98 Q118,78 105,58"/>
+        <path d="M130,98 Q142,78 155,58"/>
+        <path d="M130,98 Q106,92 82,85"/>
+        <path d="M130,98 Q154,92 178,85"/>
+        <path d="M130,98 Q106,107 82,115"/>
+        <path d="M130,98 Q154,107 178,115"/>
+        <path d="M130,98 Q118,119 105,140"/>
+        <path d="M130,98 Q142,119 155,140"/>
       </g>
+
+      <!-- Cross connections (lighter) -->
+      <g stroke="#818cf8" stroke-width="1.2" opacity="0.25" fill="none">
+        <path d="M105,58 Q94,72 82,85"/>
+        <path d="M155,58 Q166,72 178,85"/>
+        <path d="M82,115 Q94,128 105,140"/>
+        <path d="M178,115 Q166,128 155,140"/>
+        <line x1="105" y1="58" x2="155" y2="58"/>
+        <line x1="105" y1="140" x2="155" y2="140"/>
+        <line x1="82" y1="85" x2="82" y2="115"/>
+        <line x1="178" y1="85" x2="178" y2="115"/>
+      </g>
+
+      <!-- Signal pulses (small bright dots on connections) -->
+      <circle cx="118" cy="78" r="2" fill="#c4b5fd" opacity="0.8"/>
+      <circle cx="154" cy="92" r="2" fill="#c4b5fd" opacity="0.6"/>
+      <circle cx="106" cy="107" r="2" fill="#c4b5fd" opacity="0.7"/>
+      <circle cx="142" cy="119" r="2" fill="#c4b5fd" opacity="0.5"/>
     </g>
 
     <!-- Pulse rings -->
-    <circle cx="130" cy="98" r="30" fill="none" stroke="#00ff41" stroke-width="0.8" opacity="0.15"/>
-    <circle cx="130" cy="98" r="50" fill="none" stroke="#00ff41" stroke-width="0.5" opacity="0.08"/>
+    <circle cx="130" cy="98" r="30" fill="none" stroke="#818cf8" stroke-width="0.8" opacity="0.12"/>
+    <circle cx="130" cy="98" r="50" fill="none" stroke="#818cf8" stroke-width="0.5" opacity="0.06"/>
+    <circle cx="130" cy="98" r="70" fill="none" stroke="#6366f1" stroke-width="0.3" opacity="0.03"/>
   </g>
 
-  <!-- Text group — shifted down so NEO fits inside viewBox -->
-  <g transform="translate(250, 120)">
-    <!-- NEO main text -->
+  <!-- Text group -->
+  <g transform="translate(248, 120)">
+    <!-- SYNAPSE main text -->
     <text font-family="'SF Mono', 'Fira Code', 'JetBrains Mono', 'Cascadia Code', Consolas, monospace"
-          font-size="86" font-weight="800" letter-spacing="14"
-          fill="url(#textGrad)" filter="url(#neonGlow)">
-      NEO
+          font-size="72" font-weight="800" letter-spacing="8"
+          fill="url(#textGrad)" filter="url(#pulseGlow)">
+      SYNAPSE
     </text>
 
     <!-- Separator line -->
-    <line x1="0" y1="18" x2="320" y2="18" stroke="#00ff41" stroke-width="1" opacity="0.2"/>
+    <line x1="0" y1="18" x2="440" y2="18" stroke="#818cf8" stroke-width="1" opacity="0.2"/>
 
     <!-- Subtitle -->
     <text y="46" font-family="'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace"
-          font-size="14" letter-spacing="5.5" fill="#00ff41" opacity="0.6">
+          font-size="13" letter-spacing="5" fill="#818cf8" opacity="0.55">
       CLAUDE AI AGENT PLATFORM
     </text>
 
     <!-- Feature tags -->
     <g transform="translate(0, 72)">
       <!-- Tag: REPL -->
-      <rect x="0" y="0" width="58" height="22" rx="4" fill="#00ff41" opacity="0.1" stroke="#00ff41" stroke-width="0.8" stroke-opacity="0.3"/>
-      <text x="29" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#00ff41" opacity="0.7">REPL</text>
+      <rect x="0" y="0" width="58" height="22" rx="4" fill="#818cf8" opacity="0.08" stroke="#818cf8" stroke-width="0.8" stroke-opacity="0.25"/>
+      <text x="29" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#a78bfa" opacity="0.7">REPL</text>
 
       <!-- Tag: TELEGRAM -->
-      <rect x="68" y="0" width="88" height="22" rx="4" fill="#00ff41" opacity="0.1" stroke="#00ff41" stroke-width="0.8" stroke-opacity="0.3"/>
-      <text x="112" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#00ff41" opacity="0.7">TELEGRAM</text>
+      <rect x="68" y="0" width="88" height="22" rx="4" fill="#818cf8" opacity="0.08" stroke="#818cf8" stroke-width="0.8" stroke-opacity="0.25"/>
+      <text x="112" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#a78bfa" opacity="0.7">TELEGRAM</text>
 
       <!-- Tag: VOICE -->
-      <rect x="166" y="0" width="62" height="22" rx="4" fill="#00ff41" opacity="0.1" stroke="#00ff41" stroke-width="0.8" stroke-opacity="0.3"/>
-      <text x="197" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#00ff41" opacity="0.7">VOICE</text>
+      <rect x="166" y="0" width="62" height="22" rx="4" fill="#818cf8" opacity="0.08" stroke="#818cf8" stroke-width="0.8" stroke-opacity="0.25"/>
+      <text x="197" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#a78bfa" opacity="0.7">VOICE</text>
 
       <!-- Tag: MCP -->
-      <rect x="238" y="0" width="52" height="22" rx="4" fill="#00ff41" opacity="0.1" stroke="#00ff41" stroke-width="0.8" stroke-opacity="0.3"/>
-      <text x="264" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#00ff41" opacity="0.7">MCP</text>
+      <rect x="238" y="0" width="52" height="22" rx="4" fill="#818cf8" opacity="0.08" stroke="#818cf8" stroke-width="0.8" stroke-opacity="0.25"/>
+      <text x="264" y="15" text-anchor="middle" font-family="'SF Mono', Consolas, monospace" font-size="10" fill="#a78bfa" opacity="0.7">MCP</text>
     </g>
   </g>
 

@@ -65,13 +65,13 @@ describe("AgentPool", () => {
     // First acquire gets master
     const first = pool.acquire()
     expect(first.isOverflow).toBe(false)
-    expect(first.identity.name).toBe("Neo")
+    expect(first.identity.name).toBe("Synapse")
 
     // Second acquire creates a worker lazily
     const second = pool.acquire()
     expect(second.isOverflow).toBe(false) // lazy-created, not overflow
     expect(second.agent).not.toBe(primary)
-    expect(second.identity.name).not.toBe("Neo")
+    expect(second.identity.name).not.toBe("Synapse")
     expect(second.identity.emoji).toBeTruthy()
     expect(pool.workerCount).toBe(1) // one worker created
 
@@ -85,15 +85,15 @@ describe("AgentPool", () => {
     const primary = new Agent(config)
     const pool = new AgentPool(1, primary, config, db)
 
-    pool.acquire() // master = Neo
+    pool.acquire() // master = Synapse
     const w1 = pool.acquire()
     const w2 = pool.acquire()
     const w3 = pool.acquire() // all 3 workers created lazily
 
     expect(pool.workerCount).toBe(3)
-    expect(w1.identity.name).not.toBe("Neo")
-    expect(w2.identity.name).not.toBe("Neo")
-    expect(w3.identity.name).not.toBe("Neo")
+    expect(w1.identity.name).not.toBe("Synapse")
+    expect(w2.identity.name).not.toBe("Synapse")
+    expect(w3.identity.name).not.toBe("Synapse")
     expect(w1.identity.name).not.toBe(w2.identity.name)
     expect(w1.identity.name).not.toBe(w3.identity.name)
     expect(w2.identity.name).not.toBe(w3.identity.name)
@@ -208,8 +208,8 @@ describe("AgentPool", () => {
     const identities = pool.getIdentities()
     expect(identities.length).toBe(3) // but shows all potential
     expect(identities[0]).toEqual(ORCHESTRATOR_IDENTITY)
-    expect(identities[1].name).not.toBe("Neo")
-    expect(identities[2].name).not.toBe("Neo")
+    expect(identities[1].name).not.toBe("Synapse")
+    expect(identities[2].name).not.toBe("Synapse")
   })
 
   it("maxConcurrentPerChat=1 creates no workers", () => {
@@ -266,7 +266,7 @@ describe("AgentPool acquireMultiple", () => {
     for (const w of workers) {
       expect(w.agent).not.toBe(primary)
       expect(w.isOverflow).toBe(false)
-      expect(w.identity.name).not.toBe("Neo")
+      expect(w.identity.name).not.toBe("Synapse")
     }
     expect(pool.workerCount).toBe(3)
 

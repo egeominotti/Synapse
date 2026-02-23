@@ -59,8 +59,8 @@ export function generateIdentity(jobId: number): AgentIdentity {
 
 /** The orchestrator's fixed identity. */
 export const ORCHESTRATOR_IDENTITY: AgentIdentity = {
-  name: "Neo",
-  code: "NEO-01",
+  name: "Synapse",
+  code: "SYN-01",
   emoji: "◉",
 }
 

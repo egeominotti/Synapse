@@ -13,7 +13,7 @@
  *   CLAUDE_AGENT_TIMEOUT_MS     (optional) Call timeout in ms, default 120000
  *   CLAUDE_AGENT_MAX_RETRIES    (optional) Max retry attempts, default 3
  *   CLAUDE_AGENT_RETRY_DELAY_MS (optional) Initial retry delay in ms, default 1000
- *   CLAUDE_AGENT_DB_PATH        (optional) SQLite database path, default ~/.claude-agent/neo.db
+ *   CLAUDE_AGENT_DB_PATH        (optional) SQLite database path, default ~/.claude-agent/synapse.db
  *   CLAUDE_AGENT_LOG_LEVEL      (optional) Log level: DEBUG|INFO|WARN|ERROR
  *   CLAUDE_AGENT_DOCKER         (optional) Set to "1" to sandbox each spawn in Docker
  *   CLAUDE_AGENT_DOCKER_IMAGE   (optional) Docker image name (default: claude-agent:latest)

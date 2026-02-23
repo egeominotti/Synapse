@@ -1,4 +1,4 @@
-# Neo — Architecture Flowcharts
+# Synapse — Architecture Flowcharts
 
 ## Table of Contents
 
@@ -31,7 +31,7 @@ graph TB
     subgraph Core["Agent Core"]
         AP["AgentPool<br/>Master + Workers"]
         AG["Agent<br/>CLI Wrapper"]
-        SB["Sandbox<br/>/tmp/neo-agent-*"]
+        SB["Sandbox<br/>/tmp/synapse-agent-*"]
         CLI["claude CLI<br/>Bun.spawn()"]
     end
 
@@ -43,7 +43,7 @@ graph TB
     subgraph Persistence["Persistence Layer"]
         HM["HistoryManager<br/>Messages"]
         SS["SessionStore<br/>chatId → sessionId"]
-        DB[("SQLite<br/>WAL Mode<br/>neo.db")]
+        DB[("SQLite<br/>WAL Mode<br/>synapse.db")]
     end
 
     subgraph Services["Platform Services"]
@@ -179,7 +179,7 @@ flowchart TD
 
     subgraph EXEC["executeWithRetry"]
         SEMAPHORE[Semaphore.acquire<br/>Wait for permit] --> ACQUIRE[AgentPool.acquire<br/>Master or Worker]
-        ACQUIRE --> IDENTITY[Format identity header<br/>🤖 Neo NEO-01]
+        ACQUIRE --> IDENTITY[Format identity header<br/>🤖 Synapse SYN-01]
         IDENTITY --> STATUS_MSG[Reply: agent sta elaborando...]
         STATUS_MSG --> SNAPSHOT[Snapshot sandbox files<br/>Map path → mtime]
         SNAPSHOT --> CALL[Agent.call / callWithImage]
@@ -215,7 +215,7 @@ How a single Agent spawns the Claude CLI, handles I/O, parses responses, and man
 
 ```mermaid
 flowchart TD
-    CREATE([new Agent config]) --> SANDBOX[createSandbox<br/>/tmp/neo-agent-UUID]
+    CREATE([new Agent config]) --> SANDBOX[createSandbox<br/>/tmp/synapse-agent-UUID]
     SANDBOX --> WRITE_RULES[Write CLAUDE.md<br/>Safety rules to sandbox]
 
     subgraph CALL["agent.call(prompt)"]
@@ -278,7 +278,7 @@ Master/worker concurrency model with acquire/release semantics.
 ```mermaid
 flowchart TD
     subgraph INIT["Pool Initialization"]
-        CREATE_POOL([new AgentPool<br/>chatId, primaryAgent, config]) --> MASTER[Master slot<br/>Neo 🤖 NEO-01<br/>Uses --resume]
+        CREATE_POOL([new AgentPool<br/>chatId, primaryAgent, config]) --> MASTER[Master slot<br/>Synapse 🤖 SYN-01<br/>Uses --resume]
         CREATE_POOL --> WORKERS["Create N-1 workers<br/>Morpheus, Trinity, Tank...<br/>Each with unique identity"]
     end
 
@@ -302,7 +302,7 @@ flowchart TD
 
     subgraph LRU["LRU Eviction (cap: 500 pools)"]
         EVICT([Pool evicted]) --> ABORT_ALL["Abort all agents<br/>master + workers"]
-        ABORT_ALL --> CLEANUP_ALL["Cleanup all sandboxes<br/>rm -rf /tmp/neo-agent-*"]
+        ABORT_ALL --> CLEANUP_ALL["Cleanup all sandboxes<br/>rm -rf /tmp/synapse-agent-*"]
     end
 
     RETURN_MASTER --> USE([Execute call])
@@ -623,7 +623,7 @@ How each agent is isolated in a temporary directory with safety rules.
 ```mermaid
 flowchart TD
     subgraph CREATE["Sandbox Creation"]
-        NEW_AGENT([new Agent]) --> MKTEMP["mkdtempSync<br/>/tmp/neo-agent-XXXXXX"]
+        NEW_AGENT([new Agent]) --> MKTEMP["mkdtempSync<br/>/tmp/synapse-agent-XXXXXX"]
         MKTEMP --> WRITE_RULES["Write CLAUDE.md<br/>Safety rules"]
     end
 

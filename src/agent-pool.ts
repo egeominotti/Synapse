@@ -2,7 +2,7 @@
  * Per-chat agent pool with master/worker model.
  *
  * Workers are created lazily on first acquire — no upfront allocation.
- *   - Slot 0 = master (Neo) — uses --resume for session continuity
+ *   - Slot 0 = master (Synapse) — uses --resume for session continuity
  *   - Workers created on-demand up to maxConcurrentPerChat-1, then overflow
  */
 
@@ -55,7 +55,7 @@ export class AgentPool {
 
   /**
    * Acquire an agent for a call.
-   * Prefers master (Neo), then first free worker, then creates a new worker lazily.
+   * Prefers master (Synapse), then first free worker, then creates a new worker lazily.
    * Workers get fresh memory context from DB before each use.
    */
   acquire(): AcquireResult {

@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-Neo is a Claude AI agent platform with REPL and Telegram bot interfaces. It wraps the Claude Code CLI via process spawning (no SDK). Written in TypeScript, runs on Bun. Persistence via SQLite (bun:sqlite). Runtime configuration via Telegram admin commands.
+Synapse is a Claude AI agent platform with REPL and Telegram bot interfaces. It wraps the Claude Code CLI via process spawning (no SDK). Written in TypeScript, runs on Bun. Persistence via SQLite (bun:sqlite). Runtime configuration via Telegram admin commands.
 
 ## Tech Stack
 
@@ -58,7 +58,7 @@ run.ts                  → Telegram bot entry point (346 lines)
 src/
   agent.ts              → Claude CLI wrapper: spawn, retry, timeout, vision, streaming (486 lines)
   agent-pool.ts         → Per-chat agent pool: master + workers + overflow, lazy init (250 lines)
-  agent-identity.ts     → Matrix-themed identity generator: names, codes, geometric symbols (84 lines)
+  agent-identity.ts     → Identity generator: names, codes, geometric symbols (84 lines)
   orchestrator.ts       → Auto-team: detectTeamResponse, executeTeam, synthesize (180 lines)
   semaphore.ts          → Counting semaphore for concurrent task limiting (46 lines)
   health.ts             → Health monitor: DB, Groq, whisper, memory checks (204 lines)
@@ -144,7 +144,7 @@ bun install               # Install deps
 
 ### Safety & Isolation
 
-- **Sandbox isolation**: Each Agent runs in `/tmp/neo-agent-*` with CLAUDE.md safety rules
+- **Sandbox isolation**: Each Agent runs in `/tmp/synapse-agent-*` with CLAUDE.md safety rules
 - **Cross-platform safety rules**: Prevent destructive ops on Linux, macOS, Windows
 - **Cached spawn env**: `buildSpawnEnv()` cached per token
 - **Pre-compiled regex**: Formatter regex compiled once at module level
@@ -161,25 +161,25 @@ bun install               # Install deps
 
 All config via environment variables loaded in `src/config.ts`. Required: `CLAUDE_CODE_OAUTH_TOKEN`. For Telegram bot: also `TELEGRAM_BOT_TOKEN`. See `.env.example` for full reference.
 
-| Variable                        | Required  | Default                  | Description                                    |
-| ------------------------------- | --------- | ------------------------ | ---------------------------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN`       | Yes       | —                        | OAuth token for Claude CLI                     |
-| `TELEGRAM_BOT_TOKEN`            | Yes (bot) | —                        | Telegram bot token                             |
-| `TELEGRAM_ADMIN_ID`             | No        | —                        | Admin chat ID for privileged commands          |
-| `CLAUDE_AGENT_TIMEOUT_MS`       | No        | `0` (disabled)           | Agent timeout (0–600000 ms)                    |
-| `CLAUDE_AGENT_MAX_RETRIES`      | No        | `3`                      | Retry count (0–10)                             |
-| `CLAUDE_AGENT_RETRY_DELAY_MS`   | No        | `1000`                   | Initial retry delay (100–30000 ms)             |
-| `CLAUDE_AGENT_DB_PATH`          | No        | `~/.claude-agent/neo.db` | SQLite database path                           |
-| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No        | `1`                      | Skip CLI permission prompts (1/0)              |
-| `CLAUDE_AGENT_DOCKER`           | No        | `0`                      | Run agents in Docker (1/0)                     |
-| `CLAUDE_AGENT_DOCKER_IMAGE`     | No        | `claude-agent:latest`    | Docker image name                              |
-| `CLAUDE_AGENT_SYSTEM_PROMPT`    | No        | —                        | Custom system prompt                           |
-| `CLAUDE_AGENT_MCP_CONFIG_PATH`  | No        | (auto-generated)         | Path to MCP config JSON                        |
-| `CLAUDE_AGENT_MAX_CONCURRENT`   | No        | `1`                      | Max concurrent agents per chat (1–10)          |
-| `GROQ_API_KEY`                  | No        | —                        | Groq API key for cloud STT (primary)           |
-| `WHISPER_MODEL_PATH`            | No        | —                        | Path to whisper.cpp GGML model (enables voice) |
-| `WHISPER_LANGUAGE`              | No        | `auto`                   | Whisper language code (ISO 639-1 or `auto`)    |
-| `WHISPER_THREADS`               | No        | `4`                      | CPU threads for whisper (1–16)                 |
+| Variable                        | Required  | Default                      | Description                                    |
+| ------------------------------- | --------- | ---------------------------- | ---------------------------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN`       | Yes       | —                            | OAuth token for Claude CLI                     |
+| `TELEGRAM_BOT_TOKEN`            | Yes (bot) | —                            | Telegram bot token                             |
+| `TELEGRAM_ADMIN_ID`             | No        | —                            | Admin chat ID for privileged commands          |
+| `CLAUDE_AGENT_TIMEOUT_MS`       | No        | `0` (disabled)               | Agent timeout (0–600000 ms)                    |
+| `CLAUDE_AGENT_MAX_RETRIES`      | No        | `3`                          | Retry count (0–10)                             |
+| `CLAUDE_AGENT_RETRY_DELAY_MS`   | No        | `1000`                       | Initial retry delay (100–30000 ms)             |
+| `CLAUDE_AGENT_DB_PATH`          | No        | `~/.claude-agent/synapse.db` | SQLite database path                           |
+| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No        | `1`                          | Skip CLI permission prompts (1/0)              |
+| `CLAUDE_AGENT_DOCKER`           | No        | `0`                          | Run agents in Docker (1/0)                     |
+| `CLAUDE_AGENT_DOCKER_IMAGE`     | No        | `claude-agent:latest`        | Docker image name                              |
+| `CLAUDE_AGENT_SYSTEM_PROMPT`    | No        | —                            | Custom system prompt                           |
+| `CLAUDE_AGENT_MCP_CONFIG_PATH`  | No        | (auto-generated)             | Path to MCP config JSON                        |
+| `CLAUDE_AGENT_MAX_CONCURRENT`   | No        | `1`                          | Max concurrent agents per chat (1–10)          |
+| `GROQ_API_KEY`                  | No        | —                            | Groq API key for cloud STT (primary)           |
+| `WHISPER_MODEL_PATH`            | No        | —                            | Path to whisper.cpp GGML model (enables voice) |
+| `WHISPER_LANGUAGE`              | No        | `auto`                       | Whisper language code (ISO 639-1 or `auto`)    |
+| `WHISPER_THREADS`               | No        | `4`                          | CPU threads for whisper (1–16)                 |
 
 ### Runtime Config (Telegram /config)
 
@@ -203,7 +203,7 @@ Changes are validated, persisted in SQLite, and applied immediately. They surviv
 
 ## Database
 
-- **Location**: `~/.claude-agent/neo.db` (configurable via `CLAUDE_AGENT_DB_PATH`)
+- **Location**: `~/.claude-agent/synapse.db` (configurable via `CLAUDE_AGENT_DB_PATH`)
 - **Mode**: WAL (write-ahead logging) + foreign keys + 5s busy timeout
 
 ### Schema

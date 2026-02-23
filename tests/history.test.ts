@@ -10,7 +10,7 @@ let history: HistoryManager
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = mkdtempSync(join(tmpdir(), "neo-hist-"))
+  tmpDir = mkdtempSync(join(tmpdir(), "synapse-hist-"))
   db = new Database(join(tmpDir, "test.db"))
   history = new HistoryManager(db)
 })

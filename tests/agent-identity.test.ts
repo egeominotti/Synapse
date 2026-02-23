@@ -43,9 +43,9 @@ describe("generateIdentity", () => {
 })
 
 describe("ORCHESTRATOR_IDENTITY", () => {
-  it('is named "Neo"', () => {
-    expect(ORCHESTRATOR_IDENTITY.name).toBe("Neo")
-    expect(ORCHESTRATOR_IDENTITY.code).toBe("NEO-01")
+  it('is named "Synapse"', () => {
+    expect(ORCHESTRATOR_IDENTITY.name).toBe("Synapse")
+    expect(ORCHESTRATOR_IDENTITY.code).toBe("SYN-01")
     expect(ORCHESTRATOR_IDENTITY.emoji).toBe("◉")
   })
 })
@@ -63,6 +63,6 @@ describe("formatIdentityHeader", () => {
 
   it("formats orchestrator identity", () => {
     const header = formatIdentityHeader(ORCHESTRATOR_IDENTITY)
-    expect(header).toBe("◉ · Neo · NEO-01")
+    expect(header).toBe("◉ · Synapse · SYN-01")
   })
 })
