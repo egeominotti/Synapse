@@ -364,23 +364,23 @@ describe("AgentPool acquireMultiple", () => {
 // ---------------------------------------------------------------------------
 
 describe("AgentPool agent configuration", () => {
-  it("master agent has disableTools=true and effort=high", () => {
+  it("master agent has allowedTools=WebSearch and effort=high", () => {
     const db = createTestDb()
     const config = createTestConfig()
     const primary = new Agent(config)
     const pool = new AgentPool(1, primary, config, db)
 
     const { agent } = pool.acquire()
-    expect(agent.disableTools).toBe(true)
+    expect(agent.disableTools).toBe(false)
     expect(agent.effort).toBe("high")
-    expect(agent.allowedTools).toBeNull()
+    expect(agent.allowedTools).toBe("WebSearch")
     expect(agent.workerMode).toBe(false)
 
     pool.release(agent, false)
     pool.cleanup()
   })
 
-  it("worker agents have disableTools and workerMode set", () => {
+  it("worker agents have allowedTools=WebSearch and workerMode set", () => {
     const db = createTestDb()
     const config = createTestConfig()
     const primary = new Agent(config)
@@ -391,7 +391,8 @@ describe("AgentPool agent configuration", () => {
 
     // Next acquire creates a worker
     const worker = pool.acquire()
-    expect(worker.agent.disableTools).toBe(true)
+    expect(worker.agent.disableTools).toBe(false)
+    expect(worker.agent.allowedTools).toBe("WebSearch")
     expect(worker.agent.workerMode).toBe(true)
     expect(worker.agent.effort).toBeNull()
 
@@ -410,7 +411,7 @@ describe("AgentPool agent configuration", () => {
     pool.setPrimary(newMaster)
 
     const { agent } = pool.acquire()
-    expect(agent.disableTools).toBe(true)
+    expect(agent.allowedTools).toBe("WebSearch")
     expect(agent.effort).toBe("high")
 
     pool.release(agent, false)
@@ -425,7 +426,7 @@ describe("AgentPool agent configuration", () => {
 
     const workers = pool.acquireMultiple(2)
     for (const w of workers) {
-      expect(w.agent.disableTools).toBe(true)
+      expect(w.agent.allowedTools).toBe("WebSearch")
       expect(w.agent.workerMode).toBe(true)
     }
 
