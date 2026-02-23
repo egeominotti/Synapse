@@ -453,11 +453,10 @@ export class Agent {
     } else if (effectivePrompt) {
       args.push("--system-prompt", effectivePrompt)
     }
-    logger.debug("CLI args built", {
-      argCount: args.length,
-      systemPromptLength: effectivePrompt?.length ?? 0,
+    logger.info("CLI args built", {
+      args: args.filter((a) => !a.startsWith("--system-prompt")).join(" "),
+      mcpConfig: this.config.mcpConfigPath ?? "none",
       hasSession: !!this.sessionId,
-      hasPrompt: inlinePrompt !== null,
       disableTools: this.disableTools,
     })
     if (inlinePrompt !== null) args.push("-p", inlinePrompt)

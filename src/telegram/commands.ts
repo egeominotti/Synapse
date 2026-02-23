@@ -4,8 +4,6 @@
  */
 
 import { InputFile, type Bot } from "grammy"
-import { parseSchedule } from "../scheduler"
-import { generateIdentity } from "../agent-identity"
 import { logger } from "../logger"
 import type { RuntimeConfigKey } from "../types"
 import type { TelegramDeps } from "./handlers"
@@ -28,8 +26,6 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       "/reset — reset the conversation",
       "/stats — current session statistics",
       "/export — export conversation as file",
-      "/schedule — schedule a job",
-      "/jobs — list active jobs",
       "/ping — bot status",
     ]
     if (deps.isAdmin(ctx.chat.id)) {
@@ -166,177 +162,6 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     await ctx.replyWithDocument(new InputFile(buffer, filename), {
       caption: `📄 ${messages.length} messages exported`,
     })
-  })
-
-  // -------------------------------------------------------------------------
-  // Schedule
-  // -------------------------------------------------------------------------
-
-  bot.command("schedule", async (ctx) => {
-    const text = ctx.message?.text ?? ""
-    const args = text.replace(/^\/schedule\s*/, "").trim()
-
-    if (!args) {
-      await ctx.reply(
-        "⏰ *Usage:*\n\n" +
-          "`/schedule at 18:00 <prompt>` — once\n" +
-          "`/schedule every 09:00 <prompt>` — every day\n" +
-          "`/schedule every 30s <prompt>` — every 30 seconds\n" +
-          "`/schedule every 5m <prompt>` — every 5 minutes\n" +
-          "`/schedule in 30m <prompt>` — after a delay\n" +
-          "`/schedule cron */5 * * * * <prompt>` — raw cron\n\n" +
-          "Examples:\n" +
-          "`/schedule at 18:00 Remind me to call Mario`\n" +
-          "`/schedule every 09:00 Good morning! Plans for today?`\n" +
-          "`/schedule every 1m Check system status`\n" +
-          "`/schedule in 2h Check deploy status`\n" +
-          "`/schedule cron 0 0 9 * * * Good morning!`",
-        { parse_mode: "Markdown" }
-      )
-      return
-    }
-
-    // Raw cron: /schedule cron <expr> <prompt>
-    // Cron can have 5 or 6 fields, so we need a special parser
-    const cronMatch = args.match(/^cron\s+(.+)$/i)
-    const timeExprMatch = args.match(
-      /^((?:at|every)\s+\d{1,2}:\d{2}|every\s+\d+\s*(?:s|m|h|sec|min)|in\s+\d+\s*(?:s|m|h|sec|min))\s+(.+)$/i
-    )
-
-    let scheduleExpr: string
-    let prompt: string
-
-    if (cronMatch) {
-      // Extract cron fields from the rest — find where the prompt starts
-      // Cron fields are: sec min hour dom month dow (5 or 6 fields)
-      const cronParts = cronMatch[1].trim().split(/\s+/)
-      // Try 6 fields first, then 5
-      for (const fieldCount of [6, 5]) {
-        if (cronParts.length > fieldCount) {
-          const testExpr = cronParts.slice(0, fieldCount).join(" ")
-          const testPrompt = cronParts.slice(fieldCount).join(" ")
-          if (testPrompt) {
-            try {
-              parseSchedule(`cron ${testExpr}`)
-              scheduleExpr = `cron ${testExpr}`
-              prompt = testPrompt
-              break
-            } catch {
-              continue
-            }
-          }
-        }
-      }
-      // @ts-expect-error — scheduleExpr/prompt set in loop
-      if (!scheduleExpr || !prompt) {
-        await ctx.reply(
-          "❌ Invalid cron format.\n\nUsage: `/schedule cron <5-6 fields> <prompt>`\nExample: `/schedule cron 0 0 9 * * * Good morning!`",
-          { parse_mode: "Markdown" }
-        )
-        return
-      }
-    } else if (timeExprMatch) {
-      scheduleExpr = timeExprMatch[1]
-      prompt = timeExprMatch[2]
-    } else {
-      await ctx.reply(
-        "❌ Invalid format.\n\nUsage: `/schedule at 18:00 <prompt>`, `/schedule every 30s <prompt>`, `/schedule in 5m <prompt>`, `/schedule cron <expr> <prompt>`",
-        { parse_mode: "Markdown" }
-      )
-      return
-    }
-
-    try {
-      const spec = parseSchedule(scheduleExpr)
-      const jobId = deps.scheduler.createJob(ctx.chat.id, prompt, spec)
-      const identity = generateIdentity(jobId)
-      const runAtStr = spec.runAt.toLocaleString("en-US", { timeZone: "Europe/Rome" })
-      const typeLabel =
-        spec.type === "cron"
-          ? "⚙️ Cron"
-          : spec.type === "recurring"
-            ? "🔄 Recurring"
-            : spec.type === "delay"
-              ? "⏳ Delay"
-              : "📌 Once"
-      const cronInfo = spec.cronExpr ? `\nCron: \`${spec.cronExpr}\`` : ""
-
-      await ctx.reply(
-        `✅ Job #${jobId} created\n\n` +
-          `${identity.emoji} *${identity.name}* · ${identity.code}\n` +
-          `${typeLabel}${cronInfo}\n` +
-          `Next execution: *${runAtStr}*\n` +
-          `Prompt: _${prompt.slice(0, 100)}${prompt.length > 100 ? "..." : ""}_`,
-        { parse_mode: "Markdown" }
-      )
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      await ctx.reply(`❌ ${msg}`)
-    }
-  })
-
-  bot.command("jobs", async (ctx) => {
-    const jobs = deps.db.getJobsByChat(ctx.chat.id)
-
-    if (jobs.length === 0) {
-      await ctx.reply("📭 No active jobs. Use /schedule to create one.")
-      return
-    }
-
-    const lines = [`⏰ *Active jobs (${jobs.length}):*\n`]
-    for (const job of jobs) {
-      const identity = generateIdentity(job.id)
-      const runAt = new Date(job.run_at).toLocaleString("en-US", { timeZone: "Europe/Rome" })
-      const typeEmoji =
-        job.schedule_type === "cron"
-          ? "⚙️"
-          : job.schedule_type === "recurring"
-            ? "🔄"
-            : job.schedule_type === "delay"
-              ? "⏳"
-              : "📌"
-      const promptPreview = job.prompt.slice(0, 60) + (job.prompt.length > 60 ? "..." : "")
-      const cronInfo = job.cron_expr ? ` · \`${job.cron_expr}\`` : ""
-      lines.push(`${identity.emoji} *#${job.id}* ${identity.name} · ${identity.code}`)
-      lines.push(`  ${typeEmoji} ${runAt}${cronInfo}`)
-      lines.push(`  _${promptPreview}_\n`)
-    }
-
-    lines.push("Use `/job delete <id>` or `/job clear` to delete.")
-    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
-  })
-
-  bot.command("job", async (ctx) => {
-    const text = ctx.message?.text ?? ""
-    const args = text.replace(/^\/job\s*/, "").trim()
-
-    // /job clear — stop all Cron instances + delete all jobs for this chat
-    if (args === "clear") {
-      const count = deps.scheduler.cancelAllJobs(ctx.chat.id)
-      if (count > 0) {
-        await ctx.reply(`✅ ${count} jobs deleted and Cron stopped.`)
-      } else {
-        await ctx.reply("📭 No jobs to delete.")
-      }
-      return
-    }
-
-    const deleteMatch = args.match(/^delete\s+(\d+)$/)
-    if (!deleteMatch) {
-      await ctx.reply("Usage:\n`/job delete <id>` — delete a job\n`/job clear` — delete all jobs", {
-        parse_mode: "Markdown",
-      })
-      return
-    }
-
-    const jobId = parseInt(deleteMatch[1], 10)
-    const deleted = deps.scheduler.cancelJob(jobId, ctx.chat.id)
-
-    if (deleted) {
-      await ctx.reply(`✅ Job #${jobId} deleted and Cron stopped.`)
-    } else {
-      await ctx.reply(`❌ Job #${jobId} not found or does not belong to this chat.`)
-    }
   })
 
   // -------------------------------------------------------------------------

@@ -198,4 +198,81 @@ export class Database extends DatabaseCore {
       .get(chatId) as { count: number }
     return row.count
   }
+
+  /** Get a single job by ID and chat ID (includes paused jobs, active=2). */
+  getJobById(
+    jobId: number,
+    chatId: number
+  ): {
+    id: number
+    prompt: string
+    schedule_type: string
+    run_at: string
+    interval_ms: number | null
+    cron_expr: string | null
+    active: number
+  } | null {
+    return this.db
+      .query(
+        `SELECT id, prompt, schedule_type, run_at, interval_ms, cron_expr, active
+         FROM scheduled_jobs WHERE id = ? AND chat_id = ?`
+      )
+      .get(jobId, chatId) as {
+      id: number
+      prompt: string
+      schedule_type: string
+      run_at: string
+      interval_ms: number | null
+      cron_expr: string | null
+      active: number
+    } | null
+  }
+
+  /** Pause a job (set active = 2, distinguishable from done = 0). */
+  pauseJob(jobId: number, chatId: number): boolean {
+    const result = this.db.run("UPDATE scheduled_jobs SET active = 2 WHERE id = ? AND chat_id = ? AND active = 1", [
+      jobId,
+      chatId,
+    ])
+    return result.changes > 0
+  }
+
+  /** Resume a paused job (set active = 1). */
+  resumeJob(jobId: number, chatId: number): boolean {
+    const result = this.db.run("UPDATE scheduled_jobs SET active = 1 WHERE id = ? AND chat_id = ? AND active = 2", [
+      jobId,
+      chatId,
+    ])
+    return result.changes > 0
+  }
+
+  /** Get all jobs for a chat including paused ones. */
+  getAllJobsByChat(chatId: number): Array<{
+    id: number
+    prompt: string
+    schedule_type: string
+    run_at: string
+    interval_ms: number | null
+    cron_expr: string | null
+    created_at: string
+    last_run_at: string | null
+    active: number
+  }> {
+    return this.db
+      .query(
+        `SELECT id, prompt, schedule_type, run_at, interval_ms, cron_expr, created_at, last_run_at, active
+         FROM scheduled_jobs WHERE chat_id = ? AND active > 0 ORDER BY run_at ASC`
+      )
+      .all(chatId) as Array<{
+      id: number
+      prompt: string
+      schedule_type: string
+      run_at: string
+      interval_ms: number | null
+      cron_expr: string | null
+      created_at: string
+      last_run_at: string | null
+      active: number
+    }>
+  }
 }

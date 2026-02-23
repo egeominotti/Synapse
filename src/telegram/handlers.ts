@@ -15,8 +15,6 @@ import type { Database } from "../db"
 import type { SessionStore } from "../session-store"
 import type { RuntimeConfig } from "../runtime-config"
 import type { ChatQueue } from "../chat-queue"
-import type { Scheduler } from "../scheduler"
-import { parseSchedule } from "../scheduler"
 import { formatForTelegram } from "../formatter"
 import { formatIdentityHeader, generateIdentity, type AgentIdentity } from "../agent-identity"
 import { detectTeamResponse, executeTeam, synthesize } from "../orchestrator"
@@ -37,7 +35,6 @@ export interface TelegramDeps {
   histories: Map<number, HistoryManager>
   runtimeConfig: RuntimeConfig
   chatQueue: ChatQueue
-  scheduler: Scheduler
   whisperConfig: WhisperConfig | null
   botStartedAt: number
   isAdmin: (chatId: number) => boolean
@@ -48,7 +45,7 @@ export interface TelegramDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers (exported for scheduler use in telegram.ts)
+// Helpers
 // ---------------------------------------------------------------------------
 
 export function buildMeta(result: AgentCallResult): string {
@@ -353,43 +350,6 @@ async function downloadFileToSandbox(
 }
 
 // ---------------------------------------------------------------------------
-// Free-text schedule detection
-// ---------------------------------------------------------------------------
-
-/**
- * Try to detect a scheduling intent from free text.
- * Returns { scheduleExpr, prompt } if detected, null otherwise.
- *
- * Patterns:
- *   "every 30s say hello"         → every 30s, "say hello"
- *   "every 5m check status"       → every 5m, "check status"
- *   "in 10m remind me..."         → in 10m, "remind me..."
- *   "at 18:00 remind me..."       → at 18:00, "remind me..."
- */
-const RE_FREETEXT_SCHEDULE =
-  /^(?:every\s+\d+\s*(?:s|m|h|sec|min)|in\s+\d+\s*(?:s|m|h|sec|min)|(?:every|at)\s+\d{1,2}:\d{2})\b/i
-
-export function parseFreetextSchedule(text: string): { scheduleExpr: string; prompt: string } | null {
-  const match = text.match(RE_FREETEXT_SCHEDULE)
-  if (!match) return null
-
-  const scheduleExpr = match[0].trim()
-  const prompt = text.slice(match[0].length).trim()
-  if (!prompt) return null
-
-  const normalized = scheduleExpr
-
-  // Validate it actually parses
-  try {
-    parseSchedule(normalized)
-  } catch {
-    return null
-  }
-
-  return { scheduleExpr: normalized, prompt }
-}
-
-// ---------------------------------------------------------------------------
 // Auto-team: parallel worker execution when master decomposes a task
 // ---------------------------------------------------------------------------
 
@@ -582,34 +542,6 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
 
     // Immediate typing feedback — before queue, before anything
     ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
-
-    // Free-text schedule detection (DISABLED)
-    // const schedule = parseFreetextSchedule(prompt)
-    // if (schedule) {
-    //   try {
-    //     const spec = parseSchedule(schedule.scheduleExpr)
-    //     const jobId = deps.scheduler.createJob(ctx.chat.id, schedule.prompt, spec)
-    //     const runAtStr = spec.runAt.toLocaleString("en-US", { timeZone: "Europe/Rome" })
-    //     const typeLabel =
-    //       spec.type === "recurring" ? "🔄 Recurring" : spec.type === "delay" ? "⏳ Delay" : "📌 Once"
-    //     const intervalInfo =
-    //       spec.intervalMs && spec.intervalMs < 86_400_000
-    //         ? ` (every ${spec.intervalMs >= 3_600_000 ? `${spec.intervalMs / 3_600_000}h` : spec.intervalMs >= 60_000 ? `${spec.intervalMs / 60_000}m` : `${spec.intervalMs / 1_000}s`})`
-    //         : ""
-    //     await ctx.reply(
-    //       `✅ Job #${jobId} created\n\n` +
-    //         `${typeLabel}${intervalInfo}\n` +
-    //         `Next execution: *${runAtStr}*\n` +
-    //         `Prompt: _${schedule.prompt.slice(0, 100)}${schedule.prompt.length > 100 ? "..." : ""}_`,
-    //       { parse_mode: "Markdown" }
-    //     )
-    //     return
-    //   } catch (err) {
-    //     const msg = err instanceof Error ? err.message : String(err)
-    //     await ctx.reply(`❌ ${msg}`)
-    //     return
-    //   }
-    // }
 
     deps.chatQueue.enqueue(ctx.chat.id, async () => {
       logger.info("Text message", { chatId: ctx.chat.id, length: prompt.length })

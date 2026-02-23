@@ -17,14 +17,12 @@ import { HistoryManager } from "./src/history"
 import { SessionStore } from "./src/session-store"
 import { RuntimeConfig } from "./src/runtime-config"
 import { ChatQueue } from "./src/chat-queue"
-import { Scheduler } from "./src/scheduler"
 import { logger } from "./src/logger"
 import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, type TelegramDeps } from "./src/telegram/handlers"
 import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
 import { buildMemoryContext } from "./src/memory"
-import { getMcpServerNames } from "./src/mcp-config"
 import { HealthMonitor } from "./src/health"
 import { generateTeamIdentities } from "./src/agent-identity"
 
@@ -40,12 +38,6 @@ if (!botToken) {
 
 const agentConfig = loadConfig()
 logger.setMinLevel((Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO") as LogLevel)
-
-// MCP disabled — startup overhead too high for sandbox agents
-// if (!agentConfig.mcpConfigPath) {
-//   agentConfig.mcpConfigPath = join(dirname(agentConfig.dbPath), "mcp.json")
-// }
-// ensureMcpConfig(agentConfig.mcpConfigPath)
 
 const db = new Database(agentConfig.dbPath)
 const store = new SessionStore(db)
@@ -118,12 +110,9 @@ function getAgentPool(chatId: number): AgentPool {
     evicted?.cleanup()
     agentPools.delete(oldestKey)
     histories.delete(oldestKey)
-    // Cancel any scheduled jobs for the evicted chat to prevent orphan executions
-    const cancelledJobs = scheduler.cancelAllJobs(oldestKey)
     logger.debug("Agent pool evicted (LRU)", {
       evictedChatId: oldestKey,
       mapSize: agentPools.size,
-      cancelledJobs,
     })
   }
 
@@ -156,50 +145,6 @@ async function persistSession(chatId: number, agent: Agent): Promise<void> {
     logger.debug("Session persisted", { chatId, sessionId: sid.slice(0, 16) + "..." })
   }
 }
-
-// ---------------------------------------------------------------------------
-// Scheduler (DISABLED — uncomment to re-enable)
-// ---------------------------------------------------------------------------
-
-// const scheduler = new Scheduler(db, async (job) => {
-//   const jobAgent = new Agent(agentConfig)
-//   try {
-//     const result = await jobAgent.call(job.prompt)
-//     const identity = generateIdentity(job.jobId)
-//     const header = formatIdentityHeader(identity, `⏰ Job #${job.jobId}`)
-//     const meta = buildMeta(result)
-//     const { chunks, parseMode } = formatForTelegram(result.text, `${header}\n${meta}`)
-//     for (const chunk of chunks) {
-//       try {
-//         await bot.api.sendMessage(job.chatId, chunk, parseMode ? { parse_mode: parseMode } : {})
-//       } catch {
-//         await bot.api.sendMessage(job.chatId, chunk)
-//       }
-//     }
-//     const files = jobAgent.listSandboxFiles()
-//     for (const file of files) {
-//       if (!file.path.startsWith("output/")) continue
-//       try {
-//         const data = readFileSync(join(jobAgent.sandboxDir, file.path))
-//         if (data.length === 0 || data.length > MAX_FILE_SIZE) continue
-//         const displayName = file.path.replace(/^output\//, "")
-//         await bot.api.sendDocument(job.chatId, new InputFile(data, displayName), { caption: `📎 ${displayName}` })
-//       } catch (err) {
-//         logger.warn("Failed to send scheduled job file", { path: file.path, error: String(err) })
-//       }
-//     }
-//     logger.info("Scheduled job completed", {
-//       jobId: job.jobId,
-//       chatId: job.chatId,
-//       durationMs: result.durationMs,
-//     })
-//   } finally {
-//     jobAgent.cleanup()
-//   }
-// })
-
-// No-op stub — scheduler infrastructure stays intact but doesn't execute jobs
-const scheduler = new Scheduler(db, async () => {})
 
 // ---------------------------------------------------------------------------
 // Whisper (optional voice-to-text)
@@ -258,7 +203,6 @@ const deps: TelegramDeps = {
   histories,
   runtimeConfig,
   chatQueue,
-  scheduler,
   whisperConfig,
   botStartedAt,
   isAdmin,
@@ -282,7 +226,6 @@ bot.catch((err) => {
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, stopping bot...`)
   healthMonitor.stop()
-  // scheduler.stop()
   await bot.stop()
 
   // Clean up all agent pool sandboxes (temp directories)
@@ -316,7 +259,6 @@ if (deletedSessions > 0 || deletedOrphans > 0) {
   logger.info("Startup cleanup", { deletedSessions, deletedOrphans })
 }
 
-// scheduler.start()
 logger.info("Bot polling started")
 bot.start({
   onStart: async (info) => {
@@ -342,7 +284,6 @@ bot.start({
           `> session:  new\n` +
           `> db:       ${agentConfig.dbPath}\n` +
           `> memory:   ${globalStats ? `${globalStats.totalMessages} msg / ${globalStats.totalSessions} sessions` : "empty"}\n` +
-          `> mcp:      ${getMcpServerNames().length} servers (${getMcpServerNames().join(", ")})\n` +
           `> team:     ${teamRoster}\n` +
           `> workers:  ${agentConfig.maxConcurrentPerChat}x per chat\n` +
           `> health:   every 30s\n` +
