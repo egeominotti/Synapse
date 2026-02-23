@@ -9,6 +9,7 @@
  */
 
 import { Bot } from "grammy"
+import { dirname } from "path"
 import { loadConfig } from "./src/config"
 import { Database } from "./src/db"
 import { Agent } from "./src/agent"
@@ -25,6 +26,9 @@ import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
 import { buildMemoryContext } from "./src/memory"
 import { HealthMonitor } from "./src/health"
 import { generateTeamIdentities } from "./src/agent-identity"
+import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
+import { Scheduler, type ScheduledJobData } from "./src/scheduler"
+import { formatForTelegram } from "./src/formatter"
 
 // ---------------------------------------------------------------------------
 // Init
@@ -38,6 +42,13 @@ if (!botToken) {
 
 const agentConfig = loadConfig()
 logger.setMinLevel((Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO") as LogLevel)
+
+// MCP config: generate config file so agents can use bunqueue MCP tools
+const dbDir = dirname(agentConfig.dbPath)
+const mcpConfigPath = ensureMcpConfig(agentConfig.mcpConfigPath, dbDir)
+agentConfig.mcpConfigPath = mcpConfigPath
+// Set DATA_PATH so the embedded Worker shares the same SQLite DB as the MCP server
+process.env.DATA_PATH = `${dbDir}/bunqueue.db`
 
 const db = new Database(agentConfig.dbPath)
 const store = new SessionStore(db)
@@ -85,8 +96,10 @@ function getAgentPool(chatId: number): AgentPool {
   const savedSessionId = store.get(chatId)
   let agent: Agent
 
+  const chatAgentConfig = { ...agentConfig, chatId }
+
   if (savedSessionId) {
-    agent = new Agent(agentConfig)
+    agent = new Agent(chatAgentConfig)
     agent.setSessionId(savedSessionId)
     logger.info("Session restored from DB", { chatId, sessionId: savedSessionId.slice(0, 16) + "..." })
   } else {
@@ -94,11 +107,11 @@ function getAgentPool(chatId: number): AgentPool {
     const recentMessages = db.getRecentMessagesByChatId(chatId, 30)
     const memory = buildMemoryContext(recentMessages)
     if (memory) {
-      const basePrompt = agentConfig.systemPrompt ?? ""
-      agent = new Agent({ ...agentConfig, systemPrompt: basePrompt + "\n\n" + memory })
+      const basePrompt = chatAgentConfig.systemPrompt ?? ""
+      agent = new Agent({ ...chatAgentConfig, systemPrompt: basePrompt + "\n\n" + memory })
       logger.info("New agent with memory", { chatId, memoryMessages: recentMessages.length })
     } else {
-      agent = new Agent(agentConfig)
+      agent = new Agent(chatAgentConfig)
       logger.info("New agent created", { chatId })
     }
   }
@@ -116,7 +129,7 @@ function getAgentPool(chatId: number): AgentPool {
     })
   }
 
-  const pool = new AgentPool(chatId, agent, agentConfig, db)
+  const pool = new AgentPool(chatId, agent, chatAgentConfig, db)
   agentPools.set(chatId, pool)
   return pool
 }
@@ -191,6 +204,31 @@ const healthMonitor = new HealthMonitor(
 )
 
 // ---------------------------------------------------------------------------
+// Scheduler (bunqueue embedded Worker)
+// ---------------------------------------------------------------------------
+
+const scheduler = new Scheduler(
+  async (data: ScheduledJobData) => {
+    const pool = getAgentPool(data.chatId)
+    const { agent, isOverflow } = pool.acquire()
+    try {
+      const result = await agent.call(data.prompt)
+      return result.text
+    } finally {
+      pool.release(agent, isOverflow)
+    }
+  },
+  async (chatId: number, text: string) => {
+    const { html, plain } = formatForTelegram(text)
+    try {
+      await bot.api.sendMessage(chatId, `🔔 <b>Scheduled task:</b>\n\n${html}`, { parse_mode: "HTML" })
+    } catch {
+      await bot.api.sendMessage(chatId, `🔔 Scheduled task:\n\n${plain}`)
+    }
+  }
+)
+
+// ---------------------------------------------------------------------------
 // Register commands + handlers
 // ---------------------------------------------------------------------------
 
@@ -226,6 +264,7 @@ bot.catch((err) => {
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, stopping bot...`)
   healthMonitor.stop()
+  await scheduler.stop()
   await bot.stop()
 
   // Clean up all agent pool sandboxes (temp directories)
@@ -267,6 +306,9 @@ bot.start({
     // Start health monitoring (every 30 seconds)
     healthMonitor.start(30_000)
 
+    // Start scheduler (bunqueue embedded Worker)
+    scheduler.start()
+
     // Send startup message to all known chats
     if (knownChatIds.length > 0) {
       const uptime = new Date().toLocaleString("en-US", { timeZone: "Europe/Rome" })
@@ -288,6 +330,7 @@ bot.start({
           `> workers:  ${agentConfig.maxConcurrentPerChat}x per chat\n` +
           `> health:   every 30s\n` +
           `> chats:    ${knownChatIds.length}\n` +
+          `> mcp:      ${getMcpServerNames().join(", ")}\n` +
           `> collab:   ${agentConfig.collaboration ? `enabled (max ${agentConfig.maxTeamAgents} agents)` : "disabled"}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
           `> retry:    ${agentConfig.maxRetries}x\n` +

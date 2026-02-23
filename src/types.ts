@@ -80,6 +80,8 @@ export interface AgentConfig {
   collaboration: boolean
   /** Max agents per auto-team decomposition (safety cap, default: 20) */
   maxTeamAgents: number
+  /** Telegram chat ID — passed to sandbox for scheduling context */
+  chatId?: number
 }
 
 /** Result of a single agent call */

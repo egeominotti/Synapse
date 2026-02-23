@@ -52,7 +52,7 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config
-    this.sandboxDir = createSandbox(config.collaboration)
+    this.sandboxDir = createSandbox(config.collaboration, config.chatId)
   }
 
   /** List user-created files in the sandbox (excludes CLAUDE.md) */

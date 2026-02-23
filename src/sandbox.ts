@@ -36,7 +36,7 @@ export function buildSpawnEnv(token: string): Record<string, string> {
 }
 
 /** Generate the CLAUDE.md safety rules text for a sandbox directory */
-export function generateSandboxRules(sandboxDir: string, collaboration: boolean = true): string {
+export function generateSandboxRules(sandboxDir: string, collaboration: boolean = true, chatId?: number): string {
   return [
     "# CLAUDE.md",
     "",
@@ -190,7 +190,31 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
           "",
         ]
       : []),
-    `## ${collaboration ? "7" : "6"}. WHEN IN DOUBT`,
+    `## ${collaboration ? "7" : "6"}. SCHEDULING (bunqueue MCP tools)`,
+    "",
+    "You have access to bunqueue MCP tools for scheduling jobs. Use them when users ask",
+    "to be reminded, schedule tasks, or set up recurring actions.",
+    "",
+    "**Queue name:** `neo-jobs`",
+    "",
+    "**Job data format (MUST include these fields):**",
+    "```json",
+    `{ "chatId": ${chatId ?? 0}, "prompt": "the task to execute", "scheduleType": "once|cron" }`,
+    "```",
+    "",
+    "**Key tools:**",
+    "- `bunqueue_add_job` — one-time job (use `delay` in ms for future execution)",
+    "- `bunqueue_add_cron` — recurring job (standard cron expressions)",
+    "- `bunqueue_list_crons` — list active cron schedules",
+    "- `bunqueue_delete_cron` — remove a cron schedule",
+    "",
+    "**Examples:**",
+    '- "remind me in 5 minutes" → `bunqueue_add_job` with queue `neo-jobs`, delay 300000',
+    '- "every day at 9am" → `bunqueue_add_cron` with pattern `0 9 * * *`',
+    "",
+    `**IMPORTANT:** Always set chatId to \`${chatId ?? 0}\` in the job data so results are sent to the correct chat.`,
+    "",
+    `## ${collaboration ? "8" : "7"}. WHEN IN DOUBT`,
     "",
     "If a user asks you to perform a potentially dangerous operation:",
     "1. REFUSE the operation",
@@ -203,9 +227,9 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
 }
 
 /** Create an isolated sandbox directory with safety rules. Returns the path. */
-export function createSandbox(collaboration: boolean = true): string {
+export function createSandbox(collaboration: boolean = true, chatId?: number): string {
   const sandboxDir = mkdtempSync(join(tmpdir(), "neo-agent-"))
-  writeFileSync(join(sandboxDir, "CLAUDE.md"), generateSandboxRules(sandboxDir, collaboration))
+  writeFileSync(join(sandboxDir, "CLAUDE.md"), generateSandboxRules(sandboxDir, collaboration, chatId))
   return sandboxDir
 }
 
