@@ -18,6 +18,7 @@ import type { ChatQueue } from "../chat-queue"
 import { formatForTelegram } from "../formatter"
 import { formatIdentityHeader, generateIdentity, type AgentIdentity } from "../agent-identity"
 import { detectTeamResponse, executeTeam, synthesize } from "../orchestrator"
+import { writeMemoryFile, readMemoryFile, MAX_MEMORY_FILE_CHARS } from "../sandbox"
 import type { WhisperConfig } from "../whisper"
 import { transcribe } from "../whisper"
 import { logger } from "../logger"
@@ -292,7 +293,17 @@ async function executeWithRetry(
     stopTimer = startStatusTimer(ctx, chatId, statusMsgId, identity)
   }
 
+  // Inject persistent memory into sandbox before call
+  const memoryBefore = deps.db.getChatMemory(chatId)
+  if (memoryBefore) {
+    writeMemoryFile(agent.sandboxDir, memoryBefore)
+  }
+
   const execute = async (execAgent: Agent): Promise<void> => {
+    // Ensure memory is in this agent's sandbox (may differ from initial agent on retry)
+    if (memoryBefore && execAgent !== agent) {
+      writeMemoryFile(execAgent.sandboxDir, memoryBefore)
+    }
     const before = snapshotSandbox(execAgent)
     const result = await callFn(execAgent)
 
@@ -338,6 +349,15 @@ async function executeWithRetry(
 
     await sendFormatted(ctx, result.text, result, identityHeader)
     await sendSandboxFiles(ctx, execAgent, before)
+
+    // Save persistent memory if agent updated it
+    const memoryAfter = readMemoryFile(execAgent.sandboxDir)
+    if (memoryAfter !== null && memoryAfter !== memoryBefore) {
+      const truncated =
+        memoryAfter.length > MAX_MEMORY_FILE_CHARS ? memoryAfter.slice(0, MAX_MEMORY_FILE_CHARS) : memoryAfter
+      deps.db.setChatMemory(chatId, truncated)
+      logger.debug("Chat memory updated", { chatId, chars: truncated.length })
+    }
 
     // Only persist session for primary agent
     if (!isOverflow) {

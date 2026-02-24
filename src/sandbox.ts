@@ -4,7 +4,7 @@
  * that prevent Claude from modifying system files.
  */
 
-import { mkdtempSync, lstatSync, readdirSync, rmSync, writeFileSync } from "fs"
+import { mkdtempSync, lstatSync, readdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "fs"
 import { join, relative, extname } from "path"
 import { tmpdir } from "os"
 import { logger } from "./logger"
@@ -214,7 +214,25 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
     "",
     `**IMPORTANT:** Always set chatId to \`${chatId ?? 0}\` in the job data so results are sent to the correct chat.`,
     "",
-    `## ${collaboration ? "8" : "7"}. WHEN IN DOUBT`,
+    `## ${collaboration ? "8" : "7"}. PERSISTENT MEMORY`,
+    "",
+    "The file `.memory.md` in this sandbox is your persistent memory for this chat.",
+    "It survives session resets and is shared across all agents in this chat.",
+    "",
+    "**Reading:** Check `.memory.md` at the start to understand prior context.",
+    "**Writing:** Update `.memory.md` when you learn important facts about the user or project:",
+    "- User preferences, name, language, timezone",
+    "- Project details, tech stack, architecture decisions",
+    "- Recurring topics or ongoing tasks",
+    "- Key decisions made in previous conversations",
+    "",
+    "**Rules:**",
+    "- Do NOT rewrite it every turn — only update when there's genuinely new info to remember",
+    "- Keep it concise and organized (max ~4000 chars)",
+    "- Use markdown headers to organize sections",
+    "- Remove outdated information when updating",
+    "",
+    `## ${collaboration ? "9" : "8"}. WHEN IN DOUBT`,
     "",
     "If a user asks you to perform a potentially dangerous operation:",
     "1. REFUSE the operation",
@@ -224,6 +242,22 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
     "**Remember: you can always create and work on files in this sandbox freely.**",
     "**You MUST NEVER operate on files outside it.**",
   ].join("\n")
+}
+
+/** Max characters for persistent memory file */
+export const MAX_MEMORY_FILE_CHARS = 4000
+
+/** Write the .memory.md file into the sandbox. */
+export function writeMemoryFile(sandboxDir: string, memory: string): void {
+  writeFileSync(join(sandboxDir, ".memory.md"), memory)
+}
+
+/** Read the .memory.md file from the sandbox. Returns null if not present or empty. */
+export function readMemoryFile(sandboxDir: string): string | null {
+  const path = join(sandboxDir, ".memory.md")
+  if (!existsSync(path)) return null
+  const content = readFileSync(path, "utf-8").trim()
+  return content || null
 }
 
 /** Create an isolated sandbox directory with safety rules. Returns the path. */
@@ -326,7 +360,7 @@ export function listSandboxFiles(sandboxDir: string): Array<{ path: string; mtim
           walk(fullPath)
         } else if (stat.isFile()) {
           const rel = relative(sandboxDir, fullPath)
-          if (rel === "CLAUDE.md") continue
+          if (rel === "CLAUDE.md" || rel === ".memory.md") continue
           if (IGNORED_EXTENSIONS.has(extname(name).toLowerCase())) continue
           results.push({ path: rel, mtimeMs: stat.mtimeMs })
         }

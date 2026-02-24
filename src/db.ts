@@ -246,6 +246,30 @@ export class Database extends DatabaseCore {
     return result.changes > 0
   }
 
+  // ---------------------------------------------------------------------------
+  // Chat memory
+  // ---------------------------------------------------------------------------
+
+  getChatMemory(chatId: number): string | null {
+    const row = this.db.query("SELECT memory FROM chat_memory WHERE chat_id = ?").get(chatId) as {
+      memory: string
+    } | null
+    return row?.memory || null
+  }
+
+  setChatMemory(chatId: number, memory: string): void {
+    const now = new Date().toISOString()
+    this.db.run(
+      `INSERT INTO chat_memory (chat_id, memory, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(chat_id) DO UPDATE SET memory = ?, updated_at = ?`,
+      [chatId, memory, now, memory, now]
+    )
+  }
+
+  deleteChatMemory(chatId: number): void {
+    this.db.run("DELETE FROM chat_memory WHERE chat_id = ?", [chatId])
+  }
+
   /** Get all jobs for a chat including paused ones. */
   getAllJobsByChat(chatId: number): Array<{
     id: number

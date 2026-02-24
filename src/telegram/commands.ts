@@ -39,6 +39,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       "/stats — current session statistics",
       "/export — export conversation as file",
       "/ping — bot status",
+      "/memory — view persistent memory",
     ]
     if (deps.isAdmin(ctx.chat.id)) {
       lines.push("/prompt — change bot behavior (admin)")
@@ -137,6 +138,39 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       `DB: ✅ operational`,
     ]
 
+    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...replyParams(ctx) })
+  })
+
+  // -------------------------------------------------------------------------
+  // Memory
+  // -------------------------------------------------------------------------
+
+  bot.command("memory", async (ctx) => {
+    const chatId = ctx.chat.id
+    const text = ctx.message?.text ?? ""
+    const args = text.replace(/^\/memory\s*/, "").trim()
+
+    if (args === "reset") {
+      if (!deps.isAdmin(chatId)) {
+        await ctx.reply("🔒 Only admin can reset memory.", replyParams(ctx))
+        return
+      }
+      deps.db.deleteChatMemory(chatId)
+      await ctx.reply("🧹 Chat memory cleared.", replyParams(ctx))
+      return
+    }
+
+    const memory = deps.db.getChatMemory(chatId)
+    if (!memory) {
+      await ctx.reply("🧠 No memory stored yet. I'll start remembering as we chat.", replyParams(ctx))
+      return
+    }
+
+    const lines = [
+      "🧠 *Chat memory:*\n",
+      memory.length > 3000 ? memory.slice(0, 3000) + "\n\n_(truncated)_" : memory,
+      `\n_${memory.length} chars · /memory reset to clear_`,
+    ]
     await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...replyParams(ctx) })
   })
 

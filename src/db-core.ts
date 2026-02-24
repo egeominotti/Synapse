@@ -85,6 +85,12 @@ export class DatabaseCore {
       CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id DESC);
       CREATE INDEX IF NOT EXISTS idx_telegram_sessions_session ON telegram_sessions(session_id);
       CREATE INDEX IF NOT EXISTS idx_attachments_message ON attachments(message_id);
+      CREATE TABLE IF NOT EXISTS chat_memory (
+        chat_id INTEGER PRIMARY KEY,
+        memory TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_active ON scheduled_jobs(active, run_at);
       CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_chat ON scheduled_jobs(chat_id);
     `)
