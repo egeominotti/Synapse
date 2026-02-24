@@ -56,7 +56,7 @@ export class AgentPool {
   /**
    * Acquire an agent for a call.
    * Prefers master (Synapse), then first free worker, then creates a new worker lazily.
-   * Workers get fresh memory context from DB before each use.
+   * Workers with a session use --resume (own memory). New workers get conversation context injected.
    */
   acquire(): AcquireResult {
     // Prefer master
@@ -69,7 +69,8 @@ export class AgentPool {
     for (const slot of this.workerSlots) {
       if (!slot.busy) {
         slot.busy = true
-        this.refreshWorkerMemory(slot.agent)
+        // Only inject memory on first use — after that, --resume handles it
+        if (!slot.agent.getSessionId()) this.refreshWorkerMemory(slot.agent)
         return { agent: slot.agent, isOverflow: false, identity: slot.identity }
       }
     }
@@ -80,7 +81,7 @@ export class AgentPool {
       const worker = this.createWorker()
       const slot: AgentSlot = { agent: worker, identity, busy: true }
       this.workerSlots.push(slot)
-      this.refreshWorkerMemory(worker)
+      this.refreshWorkerMemory(worker) // First use — always needs context
       logger.info("Worker created on-demand", {
         chatId: this.chatId,
         worker: `${identity.emoji} ${identity.name}`,
@@ -100,18 +101,18 @@ export class AgentPool {
 
   /**
    * Release an agent after a call completes.
-   * Master: marked as available. Worker: marked as available + session cleared.
+   * Master and workers keep their sessions for memory continuity.
+   * Overflow agents are destroyed.
    */
   release(agent: Agent, isOverflow: boolean): void {
     if (!isOverflow) {
-      // Could be master or a pre-created worker
+      // Could be master or a pre-created worker — both keep their sessions
       if (agent === this.masterSlot.agent) {
         this.masterSlot.busy = false
       } else {
         for (const slot of this.workerSlots) {
           if (slot.agent === agent) {
             slot.busy = false
-            agent.setSessionId(null)
             break
           }
         }
@@ -136,9 +137,9 @@ export class AgentPool {
     return worker
   }
 
-  /** Refresh a worker's system prompt with full conversation context from DB. */
+  /** Inject initial conversation context into a worker's system prompt (first call only). */
   private refreshWorkerMemory(agent: Agent): void {
-    const recentMessages = this.db.getRecentMessagesByChatId(this.chatId, 100)
+    const recentMessages = this.db.getRecentMessagesByChatId(this.chatId, 20)
     const memory = buildFullConversationContext(recentMessages)
     const basePrompt = this.config.systemPrompt ?? ""
     agent.setSystemPrompt(memory ? basePrompt + "\n\n" + memory : basePrompt || undefined)
@@ -212,7 +213,7 @@ export class AgentPool {
       const slot = this.workerSlots.find((s) => !s.busy)
       if (slot) {
         slot.busy = true
-        this.refreshWorkerMemory(slot.agent)
+        if (!slot.agent.getSessionId()) this.refreshWorkerMemory(slot.agent)
         results.push({ agent: slot.agent, isOverflow: false, identity: slot.identity })
       } else if (this.workerSlots.length < this.maxWorkers) {
         // Create new worker lazily
@@ -220,7 +221,7 @@ export class AgentPool {
         const worker = this.createWorker()
         const newSlot: AgentSlot = { agent: worker, identity, busy: true }
         this.workerSlots.push(newSlot)
-        this.refreshWorkerMemory(worker)
+        this.refreshWorkerMemory(worker) // First use — always needs context
         logger.info("Worker created on-demand (team)", {
           chatId: this.chatId,
           worker: `${identity.emoji} ${identity.name}`,
@@ -245,7 +246,7 @@ export class AgentPool {
 
   /**
    * Release all agents acquired via acquireMultiple().
-   * Pre-created workers are returned to the pool; overflow agents are destroyed.
+   * Pre-created workers keep their sessions; overflow agents are destroyed.
    */
   releaseMultiple(agents: AcquireResult[]): void {
     for (const { agent, isOverflow } of agents) {
@@ -253,7 +254,6 @@ export class AgentPool {
         const slot = this.workerSlots.find((s) => s.agent === agent)
         if (slot) {
           slot.busy = false
-          agent.setSessionId(null)
         }
       } else {
         agent.cleanup()

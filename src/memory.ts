@@ -13,8 +13,8 @@ export const MAX_MEMORY_CHARS = 6000
 /** Max characters per response preview */
 export const MAX_RESPONSE_PREVIEW = 150
 
-/** Max characters for full conversation context (worker agents) */
-export const MAX_FULL_CONTEXT_CHARS = 50_000
+/** Max characters for initial worker context (only used on first call, then --resume takes over) */
+export const MAX_FULL_CONTEXT_CHARS = 8_000
 
 export interface MemoryMessage {
   prompt: string
@@ -58,9 +58,9 @@ export function buildMemoryContext(messages: MemoryMessage[]): string | null {
 }
 
 /**
- * Build a FULL conversation context from recent messages — no truncation.
- * Used by worker agents to get the same knowledge as the master (--resume).
- * Respects a generous char limit to avoid extreme token usage.
+ * Build conversation context for worker agents' first call.
+ * After the first call, workers use --resume for their own session memory.
+ * This only provides initial context so the worker understands the conversation.
  */
 export function buildFullConversationContext(messages: MemoryMessage[]): string | null {
   if (messages.length === 0) return null

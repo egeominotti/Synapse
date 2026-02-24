@@ -300,14 +300,13 @@ describe("Agent.buildArgs", () => {
     const agent = new Agent(baseConfig)
     agent.workerMode = true
     const args = agent.buildArgs("hello")
-    expect(args).toContain("--no-session-persistence")
     expect(args).toContain("--disable-slash-commands")
+    expect(args).not.toContain("--no-session-persistence")
   })
 
   it("does not include worker mode flags by default", () => {
     const agent = new Agent(baseConfig)
     const args = agent.buildArgs("hello")
-    expect(args).not.toContain("--no-session-persistence")
     expect(args).not.toContain("--disable-slash-commands")
   })
 
@@ -342,8 +341,8 @@ describe("Agent.buildArgs", () => {
     agent.workerMode = true
     const args = agent.buildArgs("test")
     expect(args).toContain("--allowed-tools")
-    expect(args).toContain("--no-session-persistence")
     expect(args).toContain("--disable-slash-commands")
+    expect(args).not.toContain("--no-session-persistence")
     expect(args).not.toContain("--tools")
     expect(args).not.toContain("--effort")
   })

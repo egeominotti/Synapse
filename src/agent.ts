@@ -101,7 +101,7 @@ export class Agent {
   /** When set, passes `--allowed-tools` to restrict tool access (e.g. "Bash Read Write Edit"). */
   allowedTools: string | null = null
 
-  /** When true, passes `--no-session-persistence` and `--disable-slash-commands` (worker mode). */
+  /** When true, passes `--disable-slash-commands` (worker mode). Workers now keep their own sessions. */
   workerMode: boolean = false
 
   /** Effort level: "low", "medium", "high". Null = CLI default. */
@@ -444,7 +444,7 @@ export class Agent {
     if (this.config.skipPermissions) args.push("--dangerously-skip-permissions")
     if (this.disableTools) args.push("--tools", "")
     else if (this.allowedTools) args.push("--allowed-tools", this.allowedTools)
-    if (this.workerMode) args.push("--no-session-persistence", "--disable-slash-commands")
+    if (this.workerMode) args.push("--disable-slash-commands")
     if (this.effort) args.push("--effort", this.effort)
     // Use agent-local override if set, otherwise fall back to shared config
     const effectivePrompt = this.overrideSystemPrompt !== null ? this.overrideSystemPrompt : this.config.systemPrompt
