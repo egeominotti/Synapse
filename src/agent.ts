@@ -175,7 +175,7 @@ export class Agent {
       return this.spawnViaDocker({ prompt, vision: null })
     }
 
-    const proc = Bun.spawn(this.buildArgs(prompt), {
+    const proc = Bun.spawn(this.buildArgs(prompt, "stream-json"), {
       cwd: this.sandboxDir,
       env: buildSpawnEnv(this.config.token),
       stdout: "pipe",
@@ -243,16 +243,27 @@ export class Agent {
           }
 
           if (obj.type === "assistant" && typeof obj.message === "object" && obj.message !== null) {
-            // Extract text content from assistant message events
             const msg = obj.message as Record<string, unknown>
             if (Array.isArray(msg.content)) {
               for (const block of msg.content) {
-                if (typeof block === "object" && block !== null && (block as Record<string, unknown>).type === "text") {
-                  const text = (block as Record<string, unknown>).text as string
-                  if (text && text.length > accumulated.length) {
-                    const delta = text.slice(accumulated.length)
-                    accumulated = text
-                    onEvent({ type: "text", text: delta })
+                if (typeof block === "object" && block !== null) {
+                  const b = block as Record<string, unknown>
+                  // Extract text content from assistant message events
+                  if (b.type === "text") {
+                    const text = b.text as string
+                    if (text && text.length > accumulated.length) {
+                      const delta = text.slice(accumulated.length)
+                      accumulated = text
+                      onEvent({ type: "text", text: delta })
+                    }
+                  }
+                  // Log MCP tool calls
+                  if (b.type === "tool_use") {
+                    logger.info("MCP tool called", {
+                      tool: b.name,
+                      toolId: (b.id as string)?.slice(0, 16),
+                      input: JSON.stringify(b.input ?? {}).slice(0, 200),
+                    })
                   }
                 }
               }
@@ -469,6 +480,8 @@ export class Agent {
 
     // stream-json: multiple newline-delimited JSON events — find the "result" event
     if (lines.length > 1) {
+      let resultObj: (ClaudeResponse & { type: string }) | null = null
+
       for (const line of lines) {
         let obj: Record<string, unknown>
         try {
@@ -477,20 +490,51 @@ export class Agent {
           logger.debug("Skipping non-JSON line in stream output", { line: line.slice(0, 100) })
           continue
         }
-        if (obj.type !== "result") continue
 
-        const parsed = obj as unknown as ClaudeResponse & { type: string }
-        if (parsed.session_id) this.setSessionId(parsed.session_id)
-        const tokenUsage: TokenUsage | null = parsed.usage
-          ? { inputTokens: parsed.usage.input_tokens ?? 0, outputTokens: parsed.usage.output_tokens ?? 0 }
+        // Log MCP tool calls from assistant events
+        if (obj.type === "assistant" && typeof obj.message === "object" && obj.message !== null) {
+          const msg = obj.message as Record<string, unknown>
+          if (Array.isArray(msg.content)) {
+            for (const block of msg.content) {
+              if (
+                typeof block === "object" &&
+                block !== null &&
+                (block as Record<string, unknown>).type === "tool_use"
+              ) {
+                const b = block as Record<string, unknown>
+                logger.info("MCP tool called", {
+                  tool: b.name,
+                  toolId: (b.id as string)?.slice(0, 16),
+                  input: JSON.stringify(b.input ?? {}).slice(0, 200),
+                })
+              }
+            }
+          }
+        }
+
+        // Log MCP tool results
+        if (obj.type === "tool_result" || (obj.type === "assistant" && typeof obj.tool_use_id === "string")) {
+          // tool_result events confirm tool execution completed
+        }
+
+        if (obj.type === "result") {
+          resultObj = obj as unknown as ClaudeResponse & { type: string }
+        }
+      }
+
+      if (resultObj) {
+        if (resultObj.session_id) this.setSessionId(resultObj.session_id)
+        const tokenUsage: TokenUsage | null = resultObj.usage
+          ? { inputTokens: resultObj.usage.input_tokens ?? 0, outputTokens: resultObj.usage.output_tokens ?? 0 }
           : null
-        const text = parsed.result ?? trimmed
+        const text = resultObj.result ?? trimmed
         logger.debug("Claude response received (stream-json)", {
           resultLength: text.length,
           hasTokenUsage: !!tokenUsage,
         })
         return { text, sessionId: this.sessionId, tokenUsage }
       }
+
       logger.warn("stream-json: no result event found, returning raw stdout")
       return { text: trimmed, sessionId: this.sessionId, tokenUsage: null }
     }

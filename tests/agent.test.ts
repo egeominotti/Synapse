@@ -180,6 +180,88 @@ describe("Agent.parseResponse", () => {
     const result = agent.parseResponse(json)
     expect(result.text).toBe(json)
   })
+
+  it("parses stream-json with tool_use events without breaking result", () => {
+    const lines = [
+      JSON.stringify({ type: "system", message: "Starting..." }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            {
+              type: "tool_use",
+              id: "tool_abc123",
+              name: "bunqueue_add_job",
+              input: { queue: "synapse-jobs", data: { chatId: 42, prompt: "test" } },
+            },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        session_id: "sess-tools",
+        result: "Job scheduled!",
+        usage: { input_tokens: 100, output_tokens: 50 },
+      }),
+    ].join("\n")
+
+    const result = agent.parseResponse(lines)
+    expect(result.text).toBe("Job scheduled!")
+    expect(result.sessionId).toBe("sess-tools")
+    expect(result.tokenUsage).toEqual({ inputTokens: 100, outputTokens: 50 })
+  })
+
+  it("parses stream-json with multiple tool_use events", () => {
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "t1", name: "bunqueue_add_job", input: {} }],
+        },
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "t2", name: "bunqueue_list_crons", input: {} }],
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        session_id: "sess-multi-tool",
+        result: "Done",
+      }),
+    ].join("\n")
+
+    const result = agent.parseResponse(lines)
+    expect(result.text).toBe("Done")
+    expect(result.sessionId).toBe("sess-multi-tool")
+  })
+
+  it("handles stream-json with mixed text and tool_use blocks", () => {
+    const lines = [
+      JSON.stringify({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Let me schedule that..." },
+            { type: "tool_use", id: "t1", name: "bunqueue_add_cron", input: { pattern: "0 9 * * *" } },
+          ],
+        },
+      }),
+      JSON.stringify({
+        type: "result",
+        session_id: "sess-mixed",
+        result: "Cron scheduled at 9am daily",
+      }),
+    ].join("\n")
+
+    const result = agent.parseResponse(lines)
+    expect(result.text).toBe("Cron scheduled at 9am daily")
+  })
 })
 
 // ---------------------------------------------------------------------------
