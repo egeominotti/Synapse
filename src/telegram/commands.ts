@@ -8,15 +8,27 @@ import { logger } from "../logger"
 import type { RuntimeConfigKey } from "../types"
 import type { TelegramDeps } from "./handlers"
 
+/** Build reply_parameters so every response quotes the original message (essential in groups). */
+function replyParams(ctx: { msg?: { message_id: number } }) {
+  const mid = ctx.msg?.message_id
+  return mid ? { reply_parameters: { message_id: mid } } : {}
+}
+
 export function registerCommands(bot: Bot, deps: TelegramDeps): void {
   bot.command("start", async (ctx) => {
-    await ctx.reply(
-      "👋 Hello! I'm your Claude agent.\n\n" +
-        "Write me something or send me a photo.\n\n" +
-        "/help — available commands\n" +
-        "/reset — new conversation\n" +
-        "/stats — session statistics"
-    )
+    const lines = [
+      "👋 Hello! I'm <b>Synapse</b>, your Claude agent.\n",
+      "Here's what I can do:\n",
+      "💬 Text — write me anything",
+      "📷 Photos — send a photo for visual analysis",
+      "📎 Documents — upload a file for analysis",
+      "✏️ Edit — edit a sent message to resend it",
+    ]
+    if (deps.whisperConfig) {
+      lines.push("🎙 Voice — send a voice message and I'll transcribe + respond")
+    }
+    lines.push("", "/help — all commands  ·  /reset — new conversation")
+    await ctx.reply(lines.join("\n"), { parse_mode: "HTML", ...replyParams(ctx) })
   })
 
   bot.command("help", async (ctx) => {
@@ -36,9 +48,13 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       "",
       "💬 Write any message to talk with Claude.",
       "📷 Send a photo (with or without caption) for visual analysis.",
+      "📎 Upload documents for analysis.",
       "✏️ Edit a message to resend it to Claude."
     )
-    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+    if (deps.whisperConfig) {
+      lines.push("🎙 Send a voice or audio message for transcription + response.")
+    }
+    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...replyParams(ctx) })
   })
 
   bot.command("reset", async (ctx) => {
@@ -49,7 +65,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     deps.histories.delete(chatId)
     await deps.store.delete(chatId)
     logger.info("Session reset", { chatId })
-    await ctx.reply("🔄 Session reset. You can start a new conversation.")
+    await ctx.reply("🔄 Session reset. You can start a new conversation.", replyParams(ctx))
   })
 
   bot.command("stats", async (ctx) => {
@@ -101,7 +117,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       }
     }
 
-    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...replyParams(ctx) })
   })
 
   bot.command("ping", async (ctx) => {
@@ -121,7 +137,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       `DB: ✅ operational`,
     ]
 
-    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+    await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...replyParams(ctx) })
   })
 
   // -------------------------------------------------------------------------
@@ -135,13 +151,13 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const sid = pool?.getPrimary().getSessionId() ?? savedSid
 
     if (!sid) {
-      await ctx.reply("📭 No session to export. Start a conversation first.")
+      await ctx.reply("📭 No session to export. Start a conversation first.", replyParams(ctx))
       return
     }
 
     const messages = deps.db.getMessages(sid)
     if (messages.length === 0) {
-      await ctx.reply("📭 Empty session, nothing to export.")
+      await ctx.reply("📭 Empty session, nothing to export.", replyParams(ctx))
       return
     }
 
@@ -161,6 +177,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
 
     await ctx.replyWithDocument(new InputFile(buffer, filename), {
       caption: `📄 ${messages.length} messages exported`,
+      ...replyParams(ctx),
     })
   })
 
@@ -172,7 +189,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const chatId = ctx.chat.id
 
     if (!deps.isAdmin(chatId)) {
-      await ctx.reply("🔒 Unauthorized. Only admin can change behavior.")
+      await ctx.reply("🔒 Unauthorized. Only admin can change behavior.", replyParams(ctx))
       return
     }
 
@@ -186,10 +203,12 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       if (current) {
         await ctx.reply(`🧠 *Current prompt:*\n\n_${current}_\n\n_Use /prompt reset to restore default_`, {
           parse_mode: "Markdown",
+          ...replyParams(ctx),
         })
       } else {
         await ctx.reply("🧠 No custom prompt set.\n\nUse `/prompt <text>` to set one.", {
           parse_mode: "Markdown",
+          ...replyParams(ctx),
         })
       }
       return
@@ -206,7 +225,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       deps.histories.delete(chatId)
       await deps.store.delete(chatId)
 
-      await ctx.reply("✅ Prompt removed and session reset.\n\nThe bot returns to default behavior.")
+      await ctx.reply("✅ Prompt removed and session reset.\n\nThe bot returns to default behavior.", replyParams(ctx))
       return
     }
 
@@ -224,10 +243,11 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       const changed = oldValue ? `\n\n_Previous: ${oldValue.slice(0, 100)}${oldValue.length > 100 ? "..." : ""}_` : ""
       await ctx.reply(`✅ Prompt updated and session reset.${changed}\n\n🧠 _${args}_`, {
         parse_mode: "Markdown",
+        ...replyParams(ctx),
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await ctx.reply(`❌ Error: ${msg}`)
+      await ctx.reply(`❌ Error: ${msg}`, replyParams(ctx))
     }
   })
 
@@ -239,7 +259,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
     const chatId = ctx.chat.id
 
     if (!deps.isAdmin(chatId)) {
-      await ctx.reply("🔒 Unauthorized. Only admin can configure the bot.")
+      await ctx.reply("🔒 Unauthorized. Only admin can configure the bot.", replyParams(ctx))
       return
     }
 
@@ -257,13 +277,13 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       }
       lines.push("_Use /config <key> <value> to modify_")
       lines.push("_Use /config reset to restore defaults_")
-      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...replyParams(ctx) })
       return
     }
 
     if (args === "reset") {
       rc.resetAll()
-      await ctx.reply("✅ Configuration restored to defaults.")
+      await ctx.reply("✅ Configuration restored to defaults.", replyParams(ctx))
       return
     }
 
@@ -274,12 +294,16 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
           .getAllDefinitions()
           .map((d) => d.key)
           .join(", ")
-        await ctx.reply(`❌ Unknown key: \`${key}\`\n\nValid keys: ${keys}`, { parse_mode: "Markdown" })
+        await ctx.reply(`❌ Unknown key: \`${key}\`\n\nValid keys: ${keys}`, {
+          parse_mode: "Markdown",
+          ...replyParams(ctx),
+        })
         return
       }
       const { oldValue, defaultValue } = rc.reset(key as RuntimeConfigKey)
       await ctx.reply(`✅ \`${key}\` restored\n\n\`${oldValue}\` → \`${defaultValue}\``, {
         parse_mode: "Markdown",
+        ...replyParams(ctx),
       })
       return
     }
@@ -292,7 +316,10 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
         .getAllDefinitions()
         .map((d) => d.key)
         .join(", ")
-      await ctx.reply(`❌ Unknown key: \`${key}\`\n\nValid keys: ${keys}`, { parse_mode: "Markdown" })
+      await ctx.reply(`❌ Unknown key: \`${key}\`\n\nValid keys: ${keys}`, {
+        parse_mode: "Markdown",
+        ...replyParams(ctx),
+      })
       return
     }
 
@@ -310,7 +337,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       if (def.min !== undefined) lines.push(`Min: ${def.min}`)
       if (def.max !== undefined) lines.push(`Max: ${def.max}`)
       if (def.enum) lines.push(`Values: ${def.enum.join(", ")}`)
-      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown" })
+      await ctx.reply(lines.join("\n"), { parse_mode: "Markdown", ...replyParams(ctx) })
       return
     }
 
@@ -319,10 +346,11 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       const { oldValue, newValue } = rc.set(key as RuntimeConfigKey, value)
       await ctx.reply(`✅ \`${key}\` updated\n\n\`${oldValue || '""'}\` → \`${newValue || '""'}\``, {
         parse_mode: "Markdown",
+        ...replyParams(ctx),
       })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      await ctx.reply(`❌ Error: ${msg}`, { parse_mode: "Markdown" })
+      await ctx.reply(`❌ Error: ${msg}`, { parse_mode: "Markdown", ...replyParams(ctx) })
     }
   })
 }

@@ -127,4 +127,57 @@ describe("ChatQueue", () => {
 
     expect(order).toEqual([1, 2])
   })
+
+  // --- onQueued callback tests ---
+
+  it("calls onQueued when task must wait for a slot", async () => {
+    const queue = new ChatQueue(1)
+    let queuedCalled = false
+
+    // First task occupies the slot
+    queue.enqueue(1, () => Bun.sleep(50))
+
+    // Second task should trigger onQueued since slot is occupied
+    await queue.enqueue(
+      1,
+      async () => {},
+      () => {
+        queuedCalled = true
+      }
+    )
+
+    expect(queuedCalled).toBe(true)
+  })
+
+  it("does not call onQueued when a slot is immediately available", async () => {
+    const queue = new ChatQueue(1)
+    let queuedCalled = false
+
+    await queue.enqueue(
+      1,
+      async () => {},
+      () => {
+        queuedCalled = true
+      }
+    )
+
+    expect(queuedCalled).toBe(false)
+  })
+
+  it("calls onQueued for each waiting task", async () => {
+    const queue = new ChatQueue(1)
+    let queuedCount = 0
+    const onQueued = () => {
+      queuedCount++
+    }
+
+    // First task occupies the slot
+    queue.enqueue(1, () => Bun.sleep(50))
+
+    // Both of these should trigger onQueued
+    queue.enqueue(1, async () => {}, onQueued)
+    await queue.enqueue(1, async () => {}, onQueued)
+
+    expect(queuedCount).toBe(2)
+  })
 })
