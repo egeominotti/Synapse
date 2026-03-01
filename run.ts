@@ -123,6 +123,7 @@ function getAgentPool(chatId: number): AgentPool {
     evicted?.cleanup()
     agentPools.delete(oldestKey)
     histories.delete(oldestKey)
+    store.delete(oldestKey)
     logger.debug("Agent pool evicted (LRU)", {
       evictedChatId: oldestKey,
       mapSize: agentPools.size,
