@@ -24,7 +24,7 @@
 
 - **Telegram bot** — multi-chat, voice messages, photos, documents, edited messages
 - **Persistent memory** — SQLite WAL, conversations resume across restarts
-- **Persistent message queue** — bunqueue-backed queue, messages survive crashes
+- **Auto-team task queue** — bunqueue-backed subtask distribution for parallel agent execution
 - **Scheduled jobs** — cron, interval, delay, one-shot via [bunqueue](https://github.com/egeominotti/bunqueue) MCP integration
 - **Sandbox isolation** — each agent runs in `/tmp/synapse-agent-*` with safety rules
 - **Auto-team** — master decomposes complex tasks, workers execute in parallel
@@ -114,15 +114,15 @@ See [`.env.example`](.env.example) for the full list.
 Telegram
     │
     ▼
-MessageQueue ─── bunqueue (persistent, crash-resilient)
+ChatQueue ─── Semaphore (in-memory, per-chat ordering)
     │
-    ▼ (per-chat Semaphore ordering)
+    ▼
 AgentPool ─── Master (resume) + N-1 Workers (fresh memory)
     │
 Agent ─── @anthropic-ai/claude-agent-sdk query() API
-    │
- ┌──┴──┐
- ▼     ▼
+    │                    │
+ ┌──┴──┐          TaskQueue (bunqueue)
+ ▼     ▼          auto-team subtasks → workers in parallel
 History SessionStore ──► SQLite (WAL)
                           ▲
               ┌───────────┼───────────┐

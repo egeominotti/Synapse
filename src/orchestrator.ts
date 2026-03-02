@@ -10,6 +10,7 @@
 
 import type { Agent } from "./agent"
 import type { AgentPool, AcquireResult } from "./agent-pool"
+import type { TaskQueue } from "./task-queue"
 import type { SubTask, WorkerResult, AgentCallResult } from "./types"
 import type { AgentIdentity } from "./agent-identity"
 import { logger } from "./logger"
@@ -118,48 +119,19 @@ export interface TeamProgress {
 }
 
 /**
- * Execute sub-tasks in parallel across multiple worker agents.
+ * Execute sub-tasks in parallel via bunqueue TaskQueue.
+ * Subtasks are enqueued and picked up by the Worker, which runs SDK agents.
  * Calls onProgress as each worker completes (for real-time status updates).
  */
 export async function executeTeam(
   pool: AgentPool,
   subtasks: SubTask[],
-  onProgress: (progress: TeamProgress) => void
+  chatId: number,
+  onProgress: (progress: TeamProgress) => void,
+  taskQueue: TaskQueue
 ): Promise<{ workers: AcquireResult[]; results: WorkerResult[] }> {
   const workers = pool.acquireMultiple(subtasks.length)
-
-  const promises = subtasks.map(async (subtask, i) => {
-    const worker = workers[i]
-    const start = performance.now()
-
-    try {
-      const result = await worker.agent.call(subtask.task)
-      const durationMs = Math.round(performance.now() - start)
-
-      const workerResult: WorkerResult = {
-        subtask: subtask.task,
-        identity: worker.identity,
-        result,
-        error: null,
-      }
-      onProgress({ identity: worker.identity, subtask: subtask.task, result, error: null, durationMs })
-      return workerResult
-    } catch (err) {
-      const durationMs = Math.round(performance.now() - start)
-      const errorMsg = err instanceof Error ? err.message : String(err)
-
-      const workerResult: WorkerResult = {
-        subtask: subtask.task,
-        identity: worker.identity,
-        result: null,
-        error: errorMsg,
-      }
-      onProgress({ identity: worker.identity, subtask: subtask.task, result: null, error: errorMsg, durationMs })
-      return workerResult
-    }
-  })
-
-  const results = await Promise.all(promises)
+  const results = await taskQueue.executeBatch(subtasks, workers, chatId, onProgress)
   return { workers, results }
 }
 

@@ -1,8 +1,8 @@
 /**
  * Telegram message handlers and processing pipeline.
  *
- * Handlers are thin: serialize message data → enqueue to persistent MessageQueue.
- * Processing runs in the bunqueue Worker via processMessage().
+ * Handlers use ChatQueue (in-memory) for per-chat ordering.
+ * Auto-team subtasks use TaskQueue (bunqueue) for parallel distribution.
  * All internal helpers use grammy Api directly (no Context dependency).
  */
 
@@ -12,11 +12,12 @@ import { InputFile, type Api, type Bot } from "grammy"
 import { Agent } from "../agent"
 import type { AgentPool } from "../agent-pool"
 import type { HistoryManager } from "../history"
-import type { AgentCallResult, AgentConfig, MessageJobData, SubTask } from "../types"
+import type { AgentCallResult, AgentConfig, SubTask } from "../types"
 import type { Database } from "../db"
 import type { SessionStore } from "../session-store"
 import type { RuntimeConfig } from "../runtime-config"
-import type { MessageQueue } from "../message-queue"
+import type { ChatQueue } from "../chat-queue"
+import type { TaskQueue } from "../task-queue"
 import { formatForTelegram } from "../formatter"
 import { formatIdentityHeader, generateIdentity, type AgentIdentity } from "../agent-identity"
 import { detectTeamResponse, executeTeam, synthesize } from "../orchestrator"
@@ -37,7 +38,8 @@ export interface TelegramDeps {
   agentPools: Map<number, AgentPool>
   histories: Map<number, HistoryManager>
   runtimeConfig: RuntimeConfig
-  messageQueue: MessageQueue
+  chatQueue: ChatQueue
+  taskQueue: TaskQueue
   whisperConfig: WhisperConfig | null
   botStartedAt: number
   isAdmin: (chatId: number) => boolean
@@ -508,44 +510,50 @@ async function handleAutoTeam(
   // Execute in parallel — update status message on each completion
   logger.info("Dispatching sub-tasks to workers", { chatId, workerCount: subtasks.length })
   let completed = 0
-  const { workers, results } = await executeTeam(pool, subtasks, (progress) => {
-    completed++
-    const secs = (progress.durationMs / 1000).toFixed(1)
+  const { workers, results } = await executeTeam(
+    pool,
+    subtasks,
+    chatId,
+    (progress) => {
+      completed++
+      const secs = (progress.durationMs / 1000).toFixed(1)
 
-    // Find which worker this is by matching identity
-    const idx = workerIdentities.findIndex((id) => id.name === progress.identity.name)
-    if (idx >= 0) {
-      workerStatus[idx] = { done: true, error: !!progress.error, secs }
-    }
+      // Find which worker this is by matching identity
+      const idx = workerIdentities.findIndex((id) => id.name === progress.identity.name)
+      if (idx >= 0) {
+        workerStatus[idx] = { done: true, error: !!progress.error, secs }
+      }
 
-    if (progress.error) {
-      logger.error("Worker failed", {
-        chatId,
-        worker: `${progress.identity.emoji} ${progress.identity.name}`,
-        subtask: progress.subtask.slice(0, 80),
-        error: progress.error,
-        durationMs: progress.durationMs,
-        progress: `${completed}/${subtasks.length}`,
-      })
-    } else {
-      logger.info("Worker completed", {
-        chatId,
-        worker: `${progress.identity.emoji} ${progress.identity.name}`,
-        subtask: progress.subtask.slice(0, 80),
-        durationMs: progress.durationMs,
-        resultLength: progress.result?.text.length ?? 0,
-        progress: `${completed}/${subtasks.length}`,
-      })
-    }
+      if (progress.error) {
+        logger.error("Worker failed", {
+          chatId,
+          worker: `${progress.identity.emoji} ${progress.identity.name}`,
+          subtask: progress.subtask.slice(0, 80),
+          error: progress.error,
+          durationMs: progress.durationMs,
+          progress: `${completed}/${subtasks.length}`,
+        })
+      } else {
+        logger.info("Worker completed", {
+          chatId,
+          worker: `${progress.identity.emoji} ${progress.identity.name}`,
+          subtask: progress.subtask.slice(0, 80),
+          durationMs: progress.durationMs,
+          resultLength: progress.result?.text.length ?? 0,
+          progress: `${completed}/${subtasks.length}`,
+        })
+      }
 
-    // Update status message with progress (fire-and-forget — race between workers is harmless,
-    // progress is monotonically increasing so last edit always shows the latest state)
-    if (statusMsgId) {
-      const phase = completed < subtasks.length ? `${completed}/${subtasks.length} done` : "All done — synthesizing"
-      const progressText = buildTeamProgress(subtasks, workerIdentities, workerStatus, phase)
-      editStatus(api, chatId, statusMsgId, progressText).catch(() => {})
-    }
-  })
+      // Update status message with progress (fire-and-forget — race between workers is harmless,
+      // progress is monotonically increasing so last edit always shows the latest state)
+      if (statusMsgId) {
+        const phase = completed < subtasks.length ? `${completed}/${subtasks.length} done` : "All done — synthesizing"
+        const progressText = buildTeamProgress(subtasks, workerIdentities, workerStatus, phase)
+        editStatus(api, chatId, statusMsgId, progressText).catch(() => {})
+      }
+    },
+    deps.taskQueue
+  )
 
   // Synthesize and release workers (try-finally guarantees release even on errors)
   try {
@@ -626,204 +634,126 @@ async function handleAutoTeam(
 }
 
 // ---------------------------------------------------------------------------
-// Message processor — entry point for the bunqueue Worker
+// Register message listeners (ChatQueue closures for per-chat ordering)
 // ---------------------------------------------------------------------------
 
-/** Process a deserialized message job. Called by the MessageQueue Worker. */
-export async function processMessage(data: MessageJobData, api: Api, deps: TelegramDeps): Promise<void> {
-  const { chatId, messageId, type, prompt } = data
+export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
+  bot.on("message:text", (ctx) => {
+    const chatId = ctx.chat.id
+    const messageId = ctx.message.message_id
+    const prompt = ctx.message.text
+    if (prompt.startsWith("/")) return
 
-  switch (type) {
-    case "text": {
-      logger.info("Text message", { chatId, length: prompt.length })
-      await withTyping(api, chatId, () =>
-        executeWithRetry(api, chatId, messageId, (agent) => agent.call(prompt), prompt, deps)
+    ctx.api.sendChatAction(chatId, "typing").catch(() => {})
+
+    logger.info("Text message", { chatId, length: prompt.length })
+    deps.chatQueue.enqueue(chatId, () =>
+      withTyping(ctx.api, chatId, () =>
+        executeWithRetry(ctx.api, chatId, messageId, (agent) => agent.call(prompt), prompt, deps)
       )
-      break
-    }
+    )
+  })
 
-    case "edited_text": {
-      const corrected = `[Edited message] ${prompt}`
-      logger.info("Edited text", { chatId, length: prompt.length })
-      await withTyping(api, chatId, () =>
-        executeWithRetry(api, chatId, messageId, (agent) => agent.call(corrected), corrected, deps)
-      )
-      break
-    }
+  bot.on("message:photo", (ctx) => {
+    const chatId = ctx.chat.id
+    const messageId = ctx.message.message_id
+    const caption = ctx.message.caption ?? "What do you see in this image?"
+    const largest = ctx.message.photo[ctx.message.photo.length - 1]
+    const fileId = largest.file_id
 
-    case "photo": {
-      logger.info("Photo message", { chatId, fileId: data.fileId, caption: prompt })
-      await withTyping(api, chatId, async () => {
-        const { base64, mediaType } = await downloadFileAsBase64(deps.botToken, api, data.fileId!)
+    ctx.api.sendChatAction(chatId, "typing").catch(() => {})
 
+    logger.info("Photo message", { chatId, fileId, caption })
+    deps.chatQueue.enqueue(chatId, async () => {
+      await withTyping(ctx.api, chatId, async () => {
+        const { base64, mediaType } = await downloadFileAsBase64(deps.botToken, ctx.api, fileId)
         await executeWithRetry(
-          api,
+          ctx.api,
           chatId,
           messageId,
-          (agent) => agent.callWithRawImage(mediaType, base64, prompt),
-          `[photo] ${prompt}`,
+          (agent) => agent.callWithRawImage(mediaType, base64, caption),
+          `[photo] ${caption}`,
           deps,
           async (history, msgId) => {
-            if (msgId) {
-              history.addAttachment(msgId, mediaType, Buffer.from(base64, "base64"), data.fileId!)
-            }
+            if (msgId) history.addAttachment(msgId, mediaType, Buffer.from(base64, "base64"), fileId)
           }
         )
       })
-      break
-    }
+    })
+  })
 
-    case "edited_photo": {
-      const corrected = `[Edited message] ${prompt}`
-      logger.info("Edited photo", { chatId, fileId: data.fileId })
-      await withTyping(api, chatId, async () => {
-        const { base64, mediaType } = await downloadFileAsBase64(deps.botToken, api, data.fileId!)
+  bot.on("message:document", (ctx) => {
+    const chatId = ctx.chat.id
+    const messageId = ctx.message.message_id
+    const doc = ctx.message.document
+    const fileName = doc.file_name ?? "file"
+    const caption = ctx.message.caption ?? `Analyze the file ${fileName}`
+    const fileId = doc.file_id
+    const docPrompt = `I uploaded the file "${fileName}" in the current directory. ${caption}`
 
-        await executeWithRetry(
-          api,
-          chatId,
-          messageId,
-          (agent) => agent.callWithRawImage(mediaType, base64, corrected),
-          `[photo] ${corrected}`,
-          deps,
-          async (history, msgId) => {
-            if (msgId) {
-              history.addAttachment(msgId, mediaType, Buffer.from(base64, "base64"), data.fileId!)
-            }
-          }
-        )
-      })
-      break
-    }
+    ctx.api.sendChatAction(chatId, "typing").catch(() => {})
 
-    case "document": {
-      const fileName = data.fileName ?? "file"
-      const docPrompt = `I uploaded the file "${fileName}" in the current directory. ${prompt}`
-      logger.info("Document message", { chatId, fileId: data.fileId, fileName })
-      await withTyping(api, chatId, () =>
+    logger.info("Document message", { chatId, fileId, fileName })
+    deps.chatQueue.enqueue(chatId, () =>
+      withTyping(ctx.api, chatId, () =>
         executeWithRetry(
-          api,
+          ctx.api,
           chatId,
           messageId,
           async (agent) => {
-            await downloadFileToSandbox(deps.botToken, api, data.fileId!, fileName, agent)
+            await downloadFileToSandbox(deps.botToken, ctx.api, fileId, fileName, agent)
             return agent.call(docPrompt)
           },
           docPrompt,
           deps
         )
       )
-      break
-    }
-
-    case "voice":
-    case "audio": {
-      if (!deps.whisperConfig) {
-        await api.sendMessage(
-          chatId,
-          "🎙 Voice transcription not available.\n\nSet `GROQ_API_KEY` or `WHISPER_MODEL_PATH` to enable.",
-          { parse_mode: "Markdown" }
-        )
-        return
-      }
-
-      const fileName = data.fileName ?? `voice_${Date.now()}.ogg`
-      logger.info(`${type === "voice" ? "Voice" : "Audio"} message`, { chatId, fileId: data.fileId, fileName })
-
-      await withTyping(api, chatId, async () => {
-        const agent = deps.getAgent(chatId)
-        await downloadFileToSandbox(deps.botToken, api, data.fileId!, fileName, agent)
-
-        const text = await transcribe(join(agent.sandboxDir, fileName), deps.whisperConfig!)
-        const rp = messageId ? { reply_parameters: { message_id: messageId } } : {}
-        await api.sendMessage(chatId, `🎙 _"${text}"_`, { parse_mode: "Markdown", ...rp })
-
-        const voicePrompt = type === "audio" && prompt ? `[audio] ${text}\n\n${prompt}` : `[${type}] ${text}`
-        await executeWithRetry(api, chatId, messageId, (a) => a.call(voicePrompt), voicePrompt, deps)
-      })
-      break
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Register message listeners (thin handlers — serialize and enqueue)
-// ---------------------------------------------------------------------------
-
-export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
-  bot.on("message:text", async (ctx) => {
-    const prompt = ctx.message.text
-    if (prompt.startsWith("/")) return
-
-    // Immediate typing feedback — before queue
-    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
-
-    await deps.messageQueue.enqueue({
-      chatId: ctx.chat.id,
-      messageId: ctx.message.message_id,
-      type: "text",
-      prompt,
-    })
+    )
   })
 
-  bot.on("message:photo", async (ctx) => {
-    const caption = ctx.message.caption ?? "What do you see in this image?"
-    const largest = ctx.message.photo[ctx.message.photo.length - 1]
-
-    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
-
-    await deps.messageQueue.enqueue({
-      chatId: ctx.chat.id,
-      messageId: ctx.message.message_id,
-      type: "photo",
-      prompt: caption,
-      fileId: largest.file_id,
-    })
-  })
-
-  bot.on("message:document", async (ctx) => {
-    const doc = ctx.message.document
-    const fileName = doc.file_name ?? "file"
-    const caption = ctx.message.caption ?? `Analyze the file ${fileName}`
-
-    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
-
-    await deps.messageQueue.enqueue({
-      chatId: ctx.chat.id,
-      messageId: ctx.message.message_id,
-      type: "document",
-      prompt: caption,
-      fileId: doc.file_id,
-      fileName,
-    })
-  })
-
-  bot.on("edited_message:text", async (ctx) => {
+  bot.on("edited_message:text", (ctx) => {
     const edited = ctx.editedMessage!
+    const chatId = edited.chat.id
+    const messageId = edited.message_id
     const prompt = edited.text
     if (!prompt || prompt.startsWith("/")) return
 
-    await deps.messageQueue.enqueue({
-      chatId: edited.chat.id,
-      messageId: edited.message_id,
-      type: "edited_text",
-      prompt,
-    })
+    const corrected = `[Edited message] ${prompt}`
+    logger.info("Edited text", { chatId, length: prompt.length })
+    deps.chatQueue.enqueue(chatId, () =>
+      withTyping(ctx.api, chatId, () =>
+        executeWithRetry(ctx.api, chatId, messageId, (agent) => agent.call(corrected), corrected, deps)
+      )
+    )
   })
 
-  bot.on("edited_message:photo", async (ctx) => {
+  bot.on("edited_message:photo", (ctx) => {
     const edited = ctx.editedMessage!
+    const chatId = edited.chat.id
+    const messageId = edited.message_id
     const photos = edited.photo
     if (!photos || photos.length === 0) return
     const largest = photos[photos.length - 1]
+    const fileId = largest.file_id
     const caption = edited.caption ?? "What do you see in this image?"
+    const corrected = `[Edited message] ${caption}`
 
-    await deps.messageQueue.enqueue({
-      chatId: edited.chat.id,
-      messageId: edited.message_id,
-      type: "edited_photo",
-      prompt: caption,
-      fileId: largest.file_id,
+    logger.info("Edited photo", { chatId, fileId })
+    deps.chatQueue.enqueue(chatId, async () => {
+      await withTyping(ctx.api, chatId, async () => {
+        const { base64, mediaType } = await downloadFileAsBase64(deps.botToken, ctx.api, fileId)
+        await executeWithRetry(
+          ctx.api,
+          chatId,
+          messageId,
+          (agent) => agent.callWithRawImage(mediaType, base64, corrected),
+          `[photo] ${corrected}`,
+          deps,
+          async (history, msgId) => {
+            if (msgId) history.addAttachment(msgId, mediaType, Buffer.from(base64, "base64"), fileId)
+          }
+        )
+      })
     })
   })
 
@@ -831,11 +761,14 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
   // Voice messages (whisper transcription)
   // ---------------------------------------------------------------------------
 
-  bot.on("message:voice", async (ctx) => {
+  bot.on("message:voice", (ctx) => {
+    const chatId = ctx.chat.id
+    const messageId = ctx.message.message_id
     const voice = ctx.message.voice
+    const fileName = `voice_${Date.now()}.ogg`
 
     if (!deps.whisperConfig) {
-      await ctx.reply(
+      ctx.reply(
         "🎙 Voice transcription not available.\n\n" +
           "To enable it:\n" +
           "1. `brew install whisper-cpp ffmpeg`\n" +
@@ -846,38 +779,49 @@ export function registerHandlers(bot: Bot, deps: TelegramDeps): void {
       return
     }
 
-    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
+    ctx.api.sendChatAction(chatId, "typing").catch(() => {})
 
-    await deps.messageQueue.enqueue({
-      chatId: ctx.chat.id,
-      messageId: ctx.message.message_id,
-      type: "voice",
-      prompt: "",
-      fileId: voice.file_id,
-      fileName: `voice_${Date.now()}.ogg`,
-    })
+    logger.info("Voice message", { chatId, fileId: voice.file_id, fileName })
+    deps.chatQueue.enqueue(chatId, () =>
+      withTyping(ctx.api, chatId, async () => {
+        const agent = deps.getAgent(chatId)
+        await downloadFileToSandbox(deps.botToken, ctx.api, voice.file_id, fileName, agent)
+        const text = await transcribe(join(agent.sandboxDir, fileName), deps.whisperConfig!)
+        const rp = { reply_parameters: { message_id: messageId } }
+        await ctx.api.sendMessage(chatId, `🎙 _"${text}"_`, { parse_mode: "Markdown", ...rp })
+        const voicePrompt = `[voice] ${text}`
+        await executeWithRetry(ctx.api, chatId, messageId, (a) => a.call(voicePrompt), voicePrompt, deps)
+      })
+    )
   })
 
-  bot.on("message:audio", async (ctx) => {
+  bot.on("message:audio", (ctx) => {
+    const chatId = ctx.chat.id
+    const messageId = ctx.message.message_id
     const audio = ctx.message.audio
     const caption = ctx.message.caption
+    const fileName = audio.file_name ?? `audio_${Date.now()}.mp3`
 
     if (!deps.whisperConfig) {
-      await ctx.reply("🎙 Audio transcription not available.\n\nSet `WHISPER_MODEL_PATH` to enable whisper-cpp.", {
+      ctx.reply("🎙 Audio transcription not available.\n\nSet `WHISPER_MODEL_PATH` to enable whisper-cpp.", {
         parse_mode: "Markdown",
       })
       return
     }
 
-    ctx.api.sendChatAction(ctx.chat.id, "typing").catch(() => {})
+    ctx.api.sendChatAction(chatId, "typing").catch(() => {})
 
-    await deps.messageQueue.enqueue({
-      chatId: ctx.chat.id,
-      messageId: ctx.message.message_id,
-      type: "audio",
-      prompt: caption ?? "",
-      fileId: audio.file_id,
-      fileName: audio.file_name ?? `audio_${Date.now()}.mp3`,
-    })
+    logger.info("Audio message", { chatId, fileId: audio.file_id, fileName })
+    deps.chatQueue.enqueue(chatId, () =>
+      withTyping(ctx.api, chatId, async () => {
+        const agent = deps.getAgent(chatId)
+        await downloadFileToSandbox(deps.botToken, ctx.api, audio.file_id, fileName, agent)
+        const text = await transcribe(join(agent.sandboxDir, fileName), deps.whisperConfig!)
+        const rp = { reply_parameters: { message_id: messageId } }
+        await ctx.api.sendMessage(chatId, `🎙 _"${text}"_`, { parse_mode: "Markdown", ...rp })
+        const voicePrompt = caption ? `[audio] ${text}\n\n${caption}` : `[audio] ${text}`
+        await executeWithRetry(ctx.api, chatId, messageId, (a) => a.call(voicePrompt), voicePrompt, deps)
+      })
+    )
   })
 }

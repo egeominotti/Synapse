@@ -80,28 +80,7 @@ export interface AgentCallResult {
 export type StreamEvent = { type: "text"; text: string } | { type: "done"; result: AgentCallResult }
 
 // ---------------------------------------------------------------------------
-// Persistent message queue (bunqueue-backed)
-// ---------------------------------------------------------------------------
-
-/** Telegram message types that can be serialized and queued */
-export type MessageType = "text" | "photo" | "document" | "voice" | "audio" | "edited_text" | "edited_photo"
-
-/** Serializable job data for the persistent message queue */
-export interface MessageJobData {
-  chatId: number
-  messageId?: number
-  type: MessageType
-  prompt: string
-  /** Telegram file ID (photos, documents, voice, audio) — re-downloaded by Worker */
-  fileId?: string
-  /** Original filename (documents, audio) */
-  fileName?: string
-  /** MIME type (photos: image/jpeg, image/png, etc.) */
-  mediaType?: string
-}
-
-// ---------------------------------------------------------------------------
-// Team collaboration (orchestrator)
+// Team collaboration (orchestrator + TaskQueue)
 // ---------------------------------------------------------------------------
 
 import type { AgentIdentity } from "./agent-identity"
@@ -125,6 +104,14 @@ export interface TeamResult {
   workerResults: WorkerResult[]
   synthesis: AgentCallResult
   totalDurationMs: number
+}
+
+/** Serializable subtask job for bunqueue TaskQueue */
+export interface SubTaskJob {
+  batchId: string
+  index: number
+  task: string
+  chatId: number
 }
 
 /** Slash command handler signature */
