@@ -96,7 +96,7 @@ export class RuntimeConfig {
     this.loadFromDb()
   }
 
-  /** Register a callback for when max_concurrent changes (used to sync ChatQueue) */
+  /** Register a callback for when max_concurrent changes (used to sync MessageQueue) */
   setOnMaxConcurrentChange(cb: (n: number) => void): void {
     this.onMaxConcurrentChange = cb
   }

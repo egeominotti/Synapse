@@ -38,6 +38,7 @@ const RE_BLOCKQUOTE = /^&gt;\s?(.+)$/gm
 const RE_BLOCKQUOTE_MERGE = /<\/blockquote>\n<blockquote>/g
 const RE_RESTORE_CB = /\uE000CB(\d+)\uE000/g
 const RE_RESTORE_IC = /\uE001IC(\d+)\uE001/g
+const RE_SPLIT_PRE = /<pre>[\s\S]*?<\/pre>/g
 
 export function markdownToTelegramHtml(md: string): string {
   // --- Protect fenced code blocks ---
@@ -145,11 +146,11 @@ export function chunkHtml(html: string, maxLen = TELEGRAM_MAX): string[] {
 /** Split HTML into segments preserving <pre>...</pre> blocks as atomic units */
 function splitPreBlocks(html: string): string[] {
   const segments: string[] = []
-  const regex = /<pre>[\s\S]*?<\/pre>/g
+  RE_SPLIT_PRE.lastIndex = 0
   let lastIndex = 0
   let match: RegExpExecArray | null
 
-  while ((match = regex.exec(html)) !== null) {
+  while ((match = RE_SPLIT_PRE.exec(html)) !== null) {
     if (match.index > lastIndex) {
       segments.push(html.slice(lastIndex, match.index))
     }

@@ -134,7 +134,7 @@ export function registerCommands(bot: Bot, deps: TelegramDeps): void {
       `Uptime: *${uptime}*`,
       `Active agents: *${deps.agentPools.size}*`,
       `Telegram sessions: *${deps.store.size}*`,
-      `Message queue: *${deps.chatQueue.size}*`,
+      `Message queue: *${deps.messageQueue.size}*`,
       `DB: ✅ operational`,
     ]
 

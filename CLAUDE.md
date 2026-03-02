@@ -15,7 +15,8 @@ Synapse is a Claude AI agent platform with REPL and Telegram bot interfaces. Use
 - **Logging**: pino + pino-pretty (structured, stderr only)
 - **Scheduler**: bunqueue (MCP-based job scheduling for all agents)
 - **Voice**: Groq API (primary) + whisper-cli local (fallback), whisper-large-v3-turbo
-- **Testing**: bun:test (362 tests, 21 files)
+- **Message Queue**: bunqueue (persistent message queue for Telegram, crash-resilient)
+- **Testing**: bun:test (346 tests, 23 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: `@anthropic-ai/claude-agent-sdk` `query()` API (structured messages, inline MCP, AbortController)
@@ -39,8 +40,9 @@ Database (src/db.ts)                 SQLite — sessions, messages, attachments,
         ▲                            telegram_sessions, runtime_config, scheduled_jobs
    ┌────┼────────┐
    ▼    ▼        ▼
-RuntimeConfig  ChatQueue  Scheduler  Config + semaphore queue + bunqueue scheduler
+RuntimeConfig  MessageQueue  Scheduler  Config + persistent queue + bunqueue scheduler
 
+MessageQueue (src/message-queue.ts)  Persistent bunqueue-backed message queue
 Semaphore (src/semaphore.ts)         Counting semaphore for per-chat concurrency
 Whisper (src/whisper.ts)             Groq API (primary) + whisper-cli local (fallback)
 HealthMonitor (src/health.ts)        System stability checks every 30s with Telegram alerts
@@ -54,20 +56,21 @@ Orchestrator (src/orchestrator.ts)   Auto-team: detect decomposition, execute wo
 
 ```
 index.ts                → REPL entry point (125 lines)
-run.ts                  → Telegram bot entry point (346 lines)
+run.ts                  → Telegram bot entry point (355 lines)
 src/
-  agent.ts              → Claude SDK wrapper: query(), retry, timeout, vision, streaming (423 lines)
-  agent-pool.ts         → Per-chat agent pool: master + workers + overflow, lazy init (250 lines)
+  agent.ts              → Claude SDK wrapper: query(), retry, timeout, vision, streaming (432 lines)
+  agent-pool.ts         → Per-chat agent pool: master + workers + overflow, lazy init (271 lines)
   agent-identity.ts     → Identity generator: names, codes, geometric symbols (84 lines)
   orchestrator.ts       → Auto-team: detectTeamResponse, executeTeam, synthesize (180 lines)
   semaphore.ts          → Counting semaphore for concurrent task limiting (46 lines)
   health.ts             → Health monitor: DB, Groq, whisper, memory checks (204 lines)
-  sandbox.ts            → Sandbox creation, safety rules, agent env caching (480 lines)
+  sandbox.ts            → Sandbox creation, safety rules, agent env caching (489 lines)
   memory.ts             → Conversation memory context builder (89 lines)
   mcp-config.ts         → MCP server configuration (bunqueue for all agents) (78 lines)
   db-core.ts            → Database base class: schema, sessions, messages, attachments (448 lines)
-  db.ts                 → Database extends core: Telegram sessions, config, jobs (201 lines)
-  chat-queue.ts         → Per-chat message queue with semaphore concurrency (56 lines)
+  db.ts                 → Database extends core: Telegram sessions, config, jobs (307 lines)
+  message-queue.ts      → Persistent bunqueue-backed message queue (140 lines)
+  chat-queue.ts         → In-memory per-chat queue with semaphore concurrency (56 lines)
   config.ts             → Env-based configuration with range validation (61 lines)
   formatter.ts          → Markdown → Telegram HTML converter + smart chunking (252 lines)
   runtime-config.ts     → Runtime configuration manager for Telegram /config (270 lines)
@@ -77,15 +80,15 @@ src/
   repl.ts               → Interactive terminal with slash commands (282 lines)
   repl-commands.ts      → REPL command implementations (pure functions) (140 lines)
   session-store.ts      → Telegram chatId → sessionId mapping with in-memory cache (54 lines)
-  types.ts              → All TypeScript interfaces + runtime config types (131 lines)
+  types.ts              → All TypeScript interfaces + runtime config types (169 lines)
   logger.ts             → Pino-based structured logging to stderr (72 lines)
   spinner.ts            → Terminal spinner animation (45 lines)
   utils.ts              → Duration formatting helper (9 lines)
   index.ts              → Barrel re-exports (28 lines)
   telegram/
-    handlers.ts         → Message handlers: text, photo, document, voice, audio, edited, auto-team (620 lines)
+    handlers.ts         → Message handlers: text, photo, document, voice, audio, edited, auto-team (883 lines)
     commands.ts         → Bot commands: /start, /help, /reset, /stats, /config, etc. (503 lines)
-tests/                  → 362 tests across 21 files
+tests/                  → 346 tests across 23 files
 ```
 
 ## Commands
@@ -93,7 +96,7 @@ tests/                  → 362 tests across 21 files
 ```bash
 bun run index.ts          # Run REPL
 bun run run.ts            # Run Telegram bot
-bun test                  # Run tests (362 tests)
+bun test                  # Run tests (346 tests)
 bun run typecheck         # Type check (bunx tsc --noEmit)
 bun run lint              # ESLint
 bun run format            # Prettier write
@@ -117,10 +120,10 @@ bun install               # Install deps
 
 ### Concurrency & Auto-Team
 
-- **Agent pool**: Master agent (--resume) + N-1 worker agents (fresh memory each acquire), lazy init
+- **Agent pool**: Master agent (resume) + N-1 worker agents (fresh memory each acquire), lazy init
 - **Auto-team**: Master autonomously decomposes complex tasks into parallel subtasks (JSON array response)
 - **Orchestrator**: `detectTeamResponse()` parses master reply, `executeTeam()` runs workers in parallel, `synthesize()` merges results
-- **Semaphore-based ChatQueue**: N concurrent calls per chat (configurable 1-10)
+- **MessageQueue**: bunqueue-persistent queue — messages survive crashes, per-chat Semaphore ordering, 100ms polling
 - **LRU eviction**: Telegram bot caps agent pools at 500, cleanup on eviction
 - **Overflow agents**: Temporary agents created when pool exhausted, cleaned up on release
 
@@ -135,7 +138,8 @@ bun install               # Install deps
 
 - **HTML formatted output**: Markdown → Telegram HTML with smart chunking (4096 char limit) + plain text fallback
 - **Edited message support**: Re-processes with `[Messaggio modificato]` prefix
-- **DRY handlers**: `executeWithRetry()` handles acquire/snapshot/call/history/format/retry/release + auto-team detection
+- **Decoupled handlers**: Thin serializers enqueue to `MessageQueue`; `processMessage()` Worker processes via `Api` (not `Context`)
+- **DRY execution**: `executeWithRetry()` handles acquire/snapshot/call/history/format/retry/release + auto-team detection
 - **Single status message**: Progress updates via `editMessageText` (no spam), deleted before final response
 - **Voice-to-text**: Groq API primary (OGG direct, <1 sec) → local whisper-cli fallback
 - **Sandbox file delivery**: New files in `output/` directory auto-sent to user
@@ -146,7 +150,11 @@ bun install               # Install deps
 - **Sandbox isolation**: Each Agent runs in `/tmp/synapse-agent-*` with CLAUDE.md safety rules
 - **Cross-platform safety rules**: Prevent destructive ops on Linux, macOS, Windows
 - **Cached agent env**: `buildAgentEnv()` cached per token
+- **Cached SDK base options**: Stable options (cwd, env, permissions, MCP) cached per Agent instance
+- **Cached sandbox rules**: `generateSandboxRules()` cached, avoid regeneration per agent
+- **Cached worker memory**: `acquireMultiple()` queries DB once, shares memory across workers
 - **Pre-compiled regex**: Formatter regex compiled once at module level
+- **Batch SQL**: `SessionStore.clearAll()` uses single DELETE instead of per-row loop
 
 ### Configuration
 

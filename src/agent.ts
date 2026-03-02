@@ -63,10 +63,22 @@ export class Agent {
   readonly sandboxDir: string
   /** Active AbortController — used to cancel running queries via abort() */
   private abortController: AbortController | null = null
+  /** Cached base SDK options (stable per agent: cwd, env, permissions, mcp) */
+  private readonly baseOpts: Partial<SdkOptions>
 
   constructor(config: AgentConfig) {
     this.config = config
     this.sandboxDir = createSandbox(config.collaboration, config.chatId)
+    // Cache stable options once at construction — avoids rebuilding per query
+    this.baseOpts = {
+      cwd: this.sandboxDir,
+      env: buildAgentEnv(config.token),
+      mcpServers: buildMcpServers(dirname(config.dbPath)),
+      ...(config.skipPermissions && {
+        permissionMode: "bypassPermissions" as const,
+        allowDangerouslySkipPermissions: true,
+      }),
+    }
   }
 
   /** List user-created files in the sandbox (excludes CLAUDE.md) */
@@ -148,27 +160,18 @@ export class Agent {
   // SDK options builder
   // ---------------------------------------------------------------------------
 
-  /** Build SDK query options from agent config and state. */
+  /** Build SDK query options from cached base + per-call state. */
   buildSdkOptions(): Partial<SdkOptions> {
-    const opts: Partial<SdkOptions> = {
-      cwd: this.sandboxDir,
-      env: buildAgentEnv(this.config.token),
-    }
+    const opts: Partial<SdkOptions> = { ...this.baseOpts }
 
-    // Permission mode
-    if (this.config.skipPermissions) {
-      opts.permissionMode = "bypassPermissions"
-      opts.allowDangerouslySkipPermissions = true
-    }
-
-    // Tool control
+    // Tool control (mutable)
     if (this.disableTools) {
       opts.allowedTools = []
     } else if (this.allowedTools) {
       opts.allowedTools = this.allowedTools.split(" ")
     }
 
-    // Effort level
+    // Effort level (mutable)
     if (this.effort) {
       opts.effort = this.effort
     }
@@ -182,9 +185,6 @@ export class Agent {
         opts.systemPrompt = effectivePrompt
       }
     }
-
-    // MCP servers (inline — no config file needed)
-    opts.mcpServers = buildMcpServers(dirname(this.config.dbPath))
 
     return opts
   }

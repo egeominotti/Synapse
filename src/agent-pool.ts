@@ -136,11 +136,18 @@ export class AgentPool {
   }
 
   /** Inject initial conversation context into a worker's system prompt (first call only). */
-  private refreshWorkerMemory(agent: Agent): void {
-    const recentMessages = this.db.getRecentMessagesByChatId(this.chatId, 20)
-    const memory = buildFullConversationContext(recentMessages)
+  private refreshWorkerMemory(agent: Agent, cachedMemory?: string | null): void {
+    const memory =
+      cachedMemory !== undefined
+        ? cachedMemory
+        : buildFullConversationContext(this.db.getRecentMessagesByChatId(this.chatId, 20))
     const basePrompt = this.config.systemPrompt ?? ""
     agent.setSystemPrompt(memory ? basePrompt + "\n\n" + memory : basePrompt || undefined)
+  }
+
+  /** Build conversation memory once (avoids duplicate DB queries when acquiring multiple workers). */
+  private buildMemory(): string | null {
+    return buildFullConversationContext(this.db.getRecentMessagesByChatId(this.chatId, 20))
   }
 
   /** Get the master agent (for session ID access, history, etc.) */
@@ -205,13 +212,15 @@ export class AgentPool {
    */
   acquireMultiple(count: number): AcquireResult[] {
     const results: AcquireResult[] = []
+    // Query DB once — same memory context for all workers in this batch
+    const memory = this.buildMemory()
 
     for (let i = 0; i < count; i++) {
       // Find first free existing worker
       const slot = this.workerSlots.find((s) => !s.busy)
       if (slot) {
         slot.busy = true
-        if (!slot.agent.getSessionId()) this.refreshWorkerMemory(slot.agent)
+        if (!slot.agent.getSessionId()) this.refreshWorkerMemory(slot.agent, memory)
         results.push({ agent: slot.agent, isOverflow: false, identity: slot.identity })
       } else if (this.workerSlots.length < this.maxWorkers) {
         // Create new worker lazily
@@ -219,7 +228,7 @@ export class AgentPool {
         const worker = this.createWorker()
         const newSlot: AgentSlot = { agent: worker, identity, busy: true }
         this.workerSlots.push(newSlot)
-        this.refreshWorkerMemory(worker) // First use — always needs context
+        this.refreshWorkerMemory(worker, memory)
         logger.info("Worker created on-demand (team)", {
           chatId: this.chatId,
           worker: `${identity.emoji} ${identity.name}`,
@@ -229,7 +238,7 @@ export class AgentPool {
       } else {
         // Create temporary overflow agent
         const temp = this.createWorker()
-        this.refreshWorkerMemory(temp)
+        this.refreshWorkerMemory(temp, memory)
         this.overflowCounter++
         const identity = generateIdentity(this.maxWorkers + this.overflowCounter)
         results.push({ agent: temp, isOverflow: true, identity })

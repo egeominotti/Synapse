@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/bot-Telegram-26a5e4?logo=telegram&logoColor=fff" alt="Telegram"/>
   <img src="https://img.shields.io/badge/AI-Claude-d4a574?logo=anthropic&logoColor=fff" alt="Claude"/>
   <a href="https://github.com/egeominotti/bunqueue"><img src="https://img.shields.io/badge/scheduler-bunqueue-ff6b35" alt="bunqueue"/></a>
-  <img src="https://img.shields.io/badge/tests-303_passed-brightgreen" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-346_passed-brightgreen" alt="Tests"/>
 </p>
 
 ---
@@ -24,6 +24,7 @@
 
 - **Telegram bot** — multi-chat, voice messages, photos, documents, edited messages
 - **Persistent memory** — SQLite WAL, conversations resume across restarts
+- **Persistent message queue** — bunqueue-backed queue, messages survive crashes
 - **Scheduled jobs** — cron, interval, delay, one-shot via [bunqueue](https://github.com/egeominotti/bunqueue) MCP integration
 - **Sandbox isolation** — each agent runs in `/tmp/synapse-agent-*` with safety rules
 - **Auto-team** — master decomposes complex tasks, workers execute in parallel
@@ -113,10 +114,10 @@ See [`.env.example`](.env.example) for the full list.
 Telegram
     │
     ▼
-ChatQueue ─── Semaphore (N concurrent per chat)
+MessageQueue ─── bunqueue (persistent, crash-resilient)
     │
-    ▼
-AgentPool ─── Master (--resume) + N-1 Workers (fresh memory)
+    ▼ (per-chat Semaphore ordering)
+AgentPool ─── Master (resume) + N-1 Workers (fresh memory)
     │
 Agent ─── @anthropic-ai/claude-agent-sdk query() API
     │
@@ -141,13 +142,13 @@ History SessionStore ──► SQLite (WAL)
 | Scheduler | [bunqueue](https://github.com/egeominotti/bunqueue) (MCP) |
 | Voice     | Groq API + whisper.cpp                                    |
 | Logging   | pino                                                      |
-| Testing   | bun:test (303 tests)                                      |
+| Testing   | bun:test (346 tests)                                      |
 | CI/CD     | GitHub Actions + Husky                                    |
 
 ## Development
 
 ```bash
-bun test              # 303 tests
+bun test              # 346 tests
 bun run typecheck     # TypeScript strict check
 bun run lint          # ESLint
 bun run format        # Prettier

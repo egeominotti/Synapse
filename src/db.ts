@@ -31,6 +31,11 @@ export class Database extends DatabaseCore {
     this.db.run("DELETE FROM telegram_sessions WHERE chat_id = ?", [chatId])
   }
 
+  /** Delete all telegram session mappings in a single SQL statement. */
+  clearAllTelegramSessions(): void {
+    this.db.run("DELETE FROM telegram_sessions")
+  }
+
   getAllTelegramSessions(): Array<{ chat_id: number; session_id: string }> {
     return this.db.query("SELECT chat_id, session_id FROM telegram_sessions").all() as Array<{
       chat_id: number

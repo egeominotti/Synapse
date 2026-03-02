@@ -365,10 +365,20 @@ export function readMemoryFile(sandboxDir: string): string | null {
   return content || null
 }
 
+/** Cached base rules (without sandboxDir substitution) — regenerated only when chatId/collab changes */
+let _rulesCache: { key: string; rules: string } | null = null
+
 /** Create an isolated sandbox directory with safety rules. Returns the path. */
 export function createSandbox(collaboration: boolean = true, chatId?: number): string {
   const sandboxDir = mkdtempSync(join(tmpdir(), "synapse-agent-"))
-  writeFileSync(join(sandboxDir, "CLAUDE.md"), generateSandboxRules(sandboxDir, collaboration, chatId))
+
+  // Cache the CLAUDE.md content — only regenerate when chatId or collaboration changes
+  const cacheKey = `${collaboration}:${chatId ?? 0}`
+  if (!_rulesCache || _rulesCache.key !== cacheKey) {
+    _rulesCache = { key: cacheKey, rules: generateSandboxRules(sandboxDir, collaboration, chatId) }
+  }
+
+  writeFileSync(join(sandboxDir, "CLAUDE.md"), _rulesCache.rules)
   return sandboxDir
 }
 

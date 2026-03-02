@@ -17,7 +17,8 @@ import { AgentPool } from "./src/agent-pool"
 import { HistoryManager } from "./src/history"
 import { SessionStore } from "./src/session-store"
 import { RuntimeConfig } from "./src/runtime-config"
-import { ChatQueue } from "./src/chat-queue"
+import { MessageQueue } from "./src/message-queue"
+import { processMessage } from "./src/telegram/handlers"
 import { logger } from "./src/logger"
 import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
@@ -76,8 +77,13 @@ const bot = new Bot(botToken)
 const MAX_AGENTS = 500
 const agentPools = new Map<number, AgentPool>()
 const histories = new Map<number, HistoryManager>()
-const chatQueue = new ChatQueue(agentConfig.maxConcurrentPerChat)
-runtimeConfig.setOnMaxConcurrentChange((n) => chatQueue.setMaxConcurrency(n))
+// MessageQueue: persistent bunqueue-backed queue (replaces in-memory ChatQueue)
+// Processor is wired after deps are created below — uses a forward reference.
+let depsRef: TelegramDeps | null = null
+const messageQueue = new MessageQueue(agentConfig.maxConcurrentPerChat, async (data) => {
+  await processMessage(data, bot.api, depsRef!)
+})
+runtimeConfig.setOnMaxConcurrentChange((n) => messageQueue.setMaxConcurrency(n))
 const botStartedAt = Date.now()
 
 function getAgentPool(chatId: number): AgentPool {
@@ -238,7 +244,7 @@ const deps: TelegramDeps = {
   agentPools,
   histories,
   runtimeConfig,
-  chatQueue,
+  messageQueue,
   whisperConfig,
   botStartedAt,
   isAdmin,
@@ -247,6 +253,8 @@ const deps: TelegramDeps = {
   getHistory,
   persistSession,
 }
+
+depsRef = deps
 
 registerCommands(bot, deps)
 registerHandlers(bot, deps)
@@ -262,6 +270,7 @@ bot.catch((err) => {
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, stopping bot...`)
   healthMonitor.stop()
+  await messageQueue.stop()
   await scheduler.stop()
   await bot.stop()
 
@@ -304,6 +313,9 @@ bot.start({
     // Start health monitoring (every 30 seconds)
     healthMonitor.start(30_000)
 
+    // Start persistent message queue (bunqueue Worker)
+    messageQueue.start()
+
     // Start scheduler (bunqueue embedded Worker)
     scheduler.start()
 
@@ -328,6 +340,7 @@ bot.start({
           `> workers:  ${agentConfig.maxConcurrentPerChat}x per chat\n` +
           `> health:   every 30s\n` +
           `> chats:    ${knownChatIds.length}\n` +
+          `> queue:    persistent (bunqueue)\n` +
           `> mcp:      ${getMcpServerNames().join(", ")}\n` +
           `> collab:   ${agentConfig.collaboration ? `enabled (max ${agentConfig.maxTeamAgents} agents)` : "disabled"}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
