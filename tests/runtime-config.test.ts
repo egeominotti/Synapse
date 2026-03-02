@@ -17,8 +17,6 @@ function makeConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     initialRetryDelayMs: 1_000,
     dbPath: join(tmpDir, "test.db"),
     skipPermissions: true,
-    useDocker: false,
-    dockerImage: "claude-agent:latest",
     systemPrompt: undefined,
     maxConcurrentPerChat: 1,
     collaboration: true,
@@ -48,7 +46,6 @@ describe("RuntimeConfig get/set", () => {
     expect(rc.get("timeout_ms")).toBe("120000")
     expect(rc.get("max_retries")).toBe("3")
     expect(rc.get("skip_permissions")).toBe("true")
-    expect(rc.get("docker")).toBe("false")
   })
 
   it("set changes value and returns old/new", () => {
@@ -102,13 +99,6 @@ describe("RuntimeConfig get/set", () => {
     rc.set("system_prompt", "Sei un assistente conciso")
     expect(config.systemPrompt).toBe("Sei un assistente conciso")
     expect(rc.get("system_prompt")).toBe("Sei un assistente conciso")
-  })
-
-  it("set docker_image", () => {
-    const config = makeConfig()
-    const rc = new RuntimeConfig(db, config)
-    rc.set("docker_image", "my-image:v2")
-    expect(config.dockerImage).toBe("my-image:v2")
   })
 })
 
@@ -249,7 +239,7 @@ describe("RuntimeConfig getAll", () => {
     const config = makeConfig()
     const rc = new RuntimeConfig(db, config)
     const all = rc.getAll()
-    expect(all.length).toBe(11)
+    expect(all.length).toBe(9)
     expect(all.map((a) => a.key)).toContain("timeout_ms")
     expect(all.map((a) => a.key)).toContain("system_prompt")
     expect(all.map((a) => a.key)).toContain("log_level")

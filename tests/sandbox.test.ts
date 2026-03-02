@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "bun:test"
 import { existsSync, writeFileSync, mkdirSync, rmSync } from "fs"
 import { join } from "path"
-import { MIME_TYPES, buildSpawnEnv, generateSandboxRules, createSandbox, listSandboxFiles } from "../src/sandbox"
+import { MIME_TYPES, buildAgentEnv, generateSandboxRules, createSandbox, listSandboxFiles } from "../src/sandbox"
 
 // ---------------------------------------------------------------------------
 // MIME_TYPES
@@ -23,31 +23,31 @@ describe("MIME_TYPES", () => {
 })
 
 // ---------------------------------------------------------------------------
-// buildSpawnEnv
+// buildAgentEnv
 // ---------------------------------------------------------------------------
 
-describe("buildSpawnEnv", () => {
+describe("buildAgentEnv", () => {
   it("injects CLAUDE_CODE_OAUTH_TOKEN", () => {
-    const env = buildSpawnEnv("my-token")
+    const env = buildAgentEnv("my-token")
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("my-token")
   })
 
   it("returns only string values (no undefined)", () => {
-    const env = buildSpawnEnv("tok")
+    const env = buildAgentEnv("tok")
     for (const [, value] of Object.entries(env)) {
       expect(typeof value).toBe("string")
     }
   })
 
   it("returns cached env for same token", () => {
-    const a = buildSpawnEnv("same-tok")
-    const b = buildSpawnEnv("same-tok")
+    const a = buildAgentEnv("same-tok")
+    const b = buildAgentEnv("same-tok")
     expect(a).toBe(b) // same reference
   })
 
   it("returns new env for different token", () => {
-    const a = buildSpawnEnv("tok-a")
-    const b = buildSpawnEnv("tok-b")
+    const a = buildAgentEnv("tok-a")
+    const b = buildAgentEnv("tok-b")
     expect(a).not.toBe(b)
     expect(a.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok-a")
     expect(b.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok-b")

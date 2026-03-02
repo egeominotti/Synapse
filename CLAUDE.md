@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-Synapse is a Claude AI agent platform with REPL and Telegram bot interfaces. It wraps the Claude Code CLI via process spawning (no SDK). Written in TypeScript, runs on Bun. Persistence via SQLite (bun:sqlite). Runtime configuration via Telegram admin commands.
+Synapse is a Claude AI agent platform with REPL and Telegram bot interfaces. Uses the `@anthropic-ai/claude-agent-sdk` `query()` API for all Claude interactions. Written in TypeScript, runs on Bun. Persistence via SQLite (bun:sqlite). Runtime configuration via Telegram admin commands.
 
 ## Tech Stack
 
@@ -18,7 +18,7 @@ Synapse is a Claude AI agent platform with REPL and Telegram bot interfaces. It 
 - **Testing**: bun:test (362 tests, 21 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
-- **Claude Integration**: Direct CLI spawning via `Bun.spawn()`
+- **Claude Integration**: `@anthropic-ai/claude-agent-sdk` `query()` API (structured messages, inline MCP, AbortController)
 
 ## Architecture
 
@@ -28,7 +28,7 @@ index.ts / run.ts                  Entry points (REPL / Telegram bot)
         ▼
     AgentPool (src/agent-pool.ts)    Master + worker agents per chat
         │
-    Agent (src/agent.ts)             Spawns `claude` CLI, retry + timeout
+    Agent (src/agent.ts)             SDK query() API, retry + timeout
         │
    ┌────┴────┐
    ▼         ▼
@@ -56,13 +56,13 @@ Orchestrator (src/orchestrator.ts)   Auto-team: detect decomposition, execute wo
 index.ts                → REPL entry point (125 lines)
 run.ts                  → Telegram bot entry point (346 lines)
 src/
-  agent.ts              → Claude CLI wrapper: spawn, retry, timeout, vision, streaming (486 lines)
+  agent.ts              → Claude SDK wrapper: query(), retry, timeout, vision, streaming (423 lines)
   agent-pool.ts         → Per-chat agent pool: master + workers + overflow, lazy init (250 lines)
   agent-identity.ts     → Identity generator: names, codes, geometric symbols (84 lines)
   orchestrator.ts       → Auto-team: detectTeamResponse, executeTeam, synthesize (180 lines)
   semaphore.ts          → Counting semaphore for concurrent task limiting (46 lines)
   health.ts             → Health monitor: DB, Groq, whisper, memory checks (204 lines)
-  sandbox.ts            → Sandbox creation, safety rules, spawn env caching (307 lines)
+  sandbox.ts            → Sandbox creation, safety rules, agent env caching (480 lines)
   memory.ts             → Conversation memory context builder (89 lines)
   mcp-config.ts         → MCP server configuration (bunqueue for all agents) (78 lines)
   db-core.ts            → Database base class: schema, sessions, messages, attachments (448 lines)
@@ -103,18 +103,17 @@ bun install               # Install deps
 
 ## Key Patterns
 
-### Agent & CLI
+### Agent & SDK
 
-- **No Claude SDK**: Agent spawns `claude` CLI with `--print --output-format json` flags
-- **Session continuity**: `--resume <sessionId>` flag resumes conversations
-- **Master agent**: `--tools ""` (text-only, no tool use) + `--effort high` for quality decisions
-- **Worker agents**: `--tools ""` + `--no-session-persistence` + `--disable-slash-commands` (workerMode)
-- **Prompt flag**: Always uses `-p` for explicit prompt (avoids `--tools ""` consuming positional arg)
-- **Vision**: `--input-format stream-json` with base64 image data via stdin
-- **Streaming**: Line-by-line JSON event parsing via `--output-format stream-json`
-- **Retry**: Exponential backoff on transient errors (429, 503, ETIMEDOUT, ECONNRESET)
-- **Timeout**: Configurable per-process timeout (default: disabled), hard safety cap at 5 minutes
-- **Concurrent I/O**: Reads stdout/stderr in parallel via Promise.all to prevent pipe deadlock
+- **Claude Agent SDK**: Uses `@anthropic-ai/claude-agent-sdk` `query()` API — structured messages, no CLI parsing
+- **Session continuity**: SDK `resume` option resumes conversations by session ID
+- **Master agent**: `effort: "high"` for quality decisions, all tools enabled
+- **Worker agents**: Fresh session per acquire, conversation context injected via system prompt
+- **Vision**: SDK `AsyncIterable<SDKUserMessage>` with base64 image content blocks
+- **Streaming**: SDK `includePartialMessages: true` yields `stream_event` messages with text deltas
+- **Retry**: Exponential backoff on transient errors (429, 503, ETIMEDOUT, ECONNRESET, rate_limit, server_error)
+- **Timeout**: AbortController + setTimeout, configurable timeout (default: disabled), hard safety cap at 5 minutes
+- **MCP servers**: Configured inline via SDK `mcpServers` option (no config file needed)
 
 ### Concurrency & Auto-Team
 
@@ -146,7 +145,7 @@ bun install               # Install deps
 
 - **Sandbox isolation**: Each Agent runs in `/tmp/synapse-agent-*` with CLAUDE.md safety rules
 - **Cross-platform safety rules**: Prevent destructive ops on Linux, macOS, Windows
-- **Cached spawn env**: `buildSpawnEnv()` cached per token
+- **Cached agent env**: `buildAgentEnv()` cached per token
 - **Pre-compiled regex**: Formatter regex compiled once at module level
 
 ### Configuration
@@ -170,9 +169,7 @@ All config via environment variables loaded in `src/config.ts`. Required: `CLAUD
 | `CLAUDE_AGENT_MAX_RETRIES`      | No        | `3`                          | Retry count (0–10)                             |
 | `CLAUDE_AGENT_RETRY_DELAY_MS`   | No        | `1000`                       | Initial retry delay (100–30000 ms)             |
 | `CLAUDE_AGENT_DB_PATH`          | No        | `~/.claude-agent/synapse.db` | SQLite database path                           |
-| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No        | `1`                          | Skip CLI permission prompts (1/0)              |
-| `CLAUDE_AGENT_DOCKER`           | No        | `0`                          | Run agents in Docker (1/0)                     |
-| `CLAUDE_AGENT_DOCKER_IMAGE`     | No        | `claude-agent:latest`        | Docker image name                              |
+| `CLAUDE_AGENT_SKIP_PERMISSIONS` | No        | `1`                          | Skip SDK permission prompts (1/0)              |
 | `CLAUDE_AGENT_SYSTEM_PROMPT`    | No        | —                            | Custom system prompt                           |
 | `CLAUDE_AGENT_MCP_CONFIG_PATH`  | No        | (auto-generated)             | Path to MCP config JSON                        |
 | `CLAUDE_AGENT_MAX_CONCURRENT`   | No        | `1`                          | Max concurrent agents per chat (1–10)          |
@@ -185,19 +182,17 @@ All config via environment variables loaded in `src/config.ts`. Required: `CLAUD
 
 Admin can change at runtime via `/config <key> <value>`:
 
-| Key                | Type    | Default               | Range/Enum               |
-| ------------------ | ------- | --------------------- | ------------------------ |
-| `system_prompt`    | string  | `""`                  | —                        |
-| `timeout_ms`       | number  | `0` (disabled)        | 0 or 5000–600000         |
-| `max_retries`      | number  | `3`                   | 0–10                     |
-| `retry_delay_ms`   | number  | `1000`                | 100–30000                |
-| `skip_permissions` | boolean | `true`                | true/false               |
-| `log_level`        | string  | `INFO`                | DEBUG, INFO, WARN, ERROR |
-| `docker`           | boolean | `false`               | true/false               |
-| `docker_image`     | string  | `claude-agent:latest` | —                        |
-| `max_concurrent`   | number  | `1`                   | 1–10                     |
-| `collaboration`    | boolean | `true`                | true/false               |
-| `max_team_agents`  | number  | `20`                  | 2–50                     |
+| Key                | Type    | Default        | Range/Enum               |
+| ------------------ | ------- | -------------- | ------------------------ |
+| `system_prompt`    | string  | `""`           | —                        |
+| `timeout_ms`       | number  | `0` (disabled) | 0 or 5000–600000         |
+| `max_retries`      | number  | `3`            | 0–10                     |
+| `retry_delay_ms`   | number  | `1000`         | 100–30000                |
+| `skip_permissions` | boolean | `true`         | true/false               |
+| `log_level`        | string  | `INFO`         | DEBUG, INFO, WARN, ERROR |
+| `max_concurrent`   | number  | `1`            | 1–10                     |
+| `collaboration`    | boolean | `true`         | true/false               |
+| `max_team_agents`  | number  | `20`           | 2–50                     |
 
 Changes are validated, persisted in SQLite, and applied immediately. They survive restarts.
 
@@ -226,7 +221,8 @@ scheduled_jobs    (id INTEGER PK, chat_id INTEGER, prompt TEXT, schedule_type TE
 - English UI strings in REPL and Telegram bot
 - Logs go to stderr (pino) to keep stdout clean for CLI output
 - No build step — Bun JIT compiles TypeScript directly
-- External binaries spawned via `Bun.spawn()` (claude CLI, whisper-cli, ffmpeg)
+- Claude interactions via `@anthropic-ai/claude-agent-sdk` `query()` API
+- External binaries spawned via `Bun.spawn()` (whisper-cli, ffmpeg)
 - Tests use temp directories with cleanup — no persistent side effects
 - Admin auth via `TELEGRAM_ADMIN_ID` env var
 - Pre-commit hooks: typecheck + lint + format check

@@ -16,8 +16,6 @@ function createTestConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
     initialRetryDelayMs: 1000,
     dbPath: "",
     skipPermissions: true,
-    useDocker: false,
-    dockerImage: "claude-agent:latest",
     maxConcurrentPerChat: 3,
     collaboration: true,
     maxTeamAgents: 20,
@@ -374,13 +372,12 @@ describe("AgentPool agent configuration", () => {
     expect(agent.disableTools).toBe(false)
     expect(agent.effort).toBe("high")
     expect(agent.allowedTools).toBeNull()
-    expect(agent.workerMode).toBe(false)
 
     pool.release(agent, false)
     pool.cleanup()
   })
 
-  it("worker agents have all tools enabled and workerMode set", () => {
+  it("worker agents have all tools enabled and fresh session", () => {
     const db = createTestDb()
     const config = createTestConfig()
     const primary = new Agent(config)
@@ -393,7 +390,6 @@ describe("AgentPool agent configuration", () => {
     const worker = pool.acquire()
     expect(worker.agent.disableTools).toBe(false)
     expect(worker.agent.allowedTools).toBeNull()
-    expect(worker.agent.workerMode).toBe(true)
     expect(worker.agent.effort).toBeNull()
 
     pool.release(worker.agent, worker.isOverflow)
@@ -427,7 +423,7 @@ describe("AgentPool agent configuration", () => {
     const workers = pool.acquireMultiple(2)
     for (const w of workers) {
       expect(w.agent.allowedTools).toBeNull()
-      expect(w.agent.workerMode).toBe(true)
+      expect(w.agent.disableTools).toBe(false)
     }
 
     pool.releaseMultiple(workers)

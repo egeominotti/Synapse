@@ -34,7 +34,6 @@ describe("loadConfig", () => {
     delete Bun.env.CLAUDE_AGENT_RETRY_DELAY_MS
     delete Bun.env.CLAUDE_AGENT_DB_PATH
     delete Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS
-    delete Bun.env.CLAUDE_AGENT_DOCKER
     delete Bun.env.CLAUDE_AGENT_SYSTEM_PROMPT
 
     const { loadConfig } = await import("../src/config")
@@ -46,8 +45,6 @@ describe("loadConfig", () => {
     expect(config.initialRetryDelayMs).toBe(1_000)
     expect(config.dbPath).toBe(join(homedir(), ".claude-agent", "synapse.db"))
     expect(config.skipPermissions).toBe(true)
-    expect(config.useDocker).toBe(false)
-    expect(config.dockerImage).toBe("claude-agent:latest")
     expect(config.systemPrompt).toBeUndefined()
   })
 
@@ -58,8 +55,6 @@ describe("loadConfig", () => {
     Bun.env.CLAUDE_AGENT_RETRY_DELAY_MS = "2000"
     Bun.env.CLAUDE_AGENT_DB_PATH = "/tmp/custom.db"
     Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS = "0"
-    Bun.env.CLAUDE_AGENT_DOCKER = "1"
-    Bun.env.CLAUDE_AGENT_DOCKER_IMAGE = "my-image:v2"
     Bun.env.CLAUDE_AGENT_SYSTEM_PROMPT = "Be concise"
 
     const { loadConfig } = await import("../src/config")
@@ -71,8 +66,6 @@ describe("loadConfig", () => {
     expect(config.initialRetryDelayMs).toBe(2_000)
     expect(config.dbPath).toBe("/tmp/custom.db")
     expect(config.skipPermissions).toBe(false)
-    expect(config.useDocker).toBe(true)
-    expect(config.dockerImage).toBe("my-image:v2")
     expect(config.systemPrompt).toBe("Be concise")
   })
 

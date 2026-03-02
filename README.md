@@ -44,7 +44,7 @@ bun install
 
 ### 2. Get your Claude Code OAuth token
 
-Synapse uses the Claude Code CLI under the hood. You need an OAuth token to authenticate:
+Synapse uses the `@anthropic-ai/claude-agent-sdk` which requires a Claude Code OAuth token:
 
 ```bash
 # If you haven't installed Claude Code yet:
@@ -118,7 +118,7 @@ ChatQueue ─── Semaphore (N concurrent per chat)
     ▼
 AgentPool ─── Master (--resume) + N-1 Workers (fresh memory)
     │
-Agent ─── Bun.spawn("claude --print --output-format json")
+Agent ─── @anthropic-ai/claude-agent-sdk query() API
     │
  ┌──┴──┐
  ▼     ▼

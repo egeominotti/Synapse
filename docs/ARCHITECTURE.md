@@ -30,9 +30,9 @@ graph TB
 
     subgraph Core["Agent Core"]
         AP["AgentPool<br/>Master + Workers"]
-        AG["Agent<br/>CLI Wrapper"]
+        AG["Agent<br/>SDK query() API"]
         SB["Sandbox<br/>/tmp/synapse-agent-*"]
-        CLI["claude CLI<br/>Bun.spawn()"]
+        SDK["claude-agent-sdk<br/>query()"]
     end
 
     subgraph Concurrency["Concurrency Control"]
@@ -63,7 +63,7 @@ graph TB
     SEM --> AP
     AP --> AG
     AG --> SB
-    AG --> CLI
+    AG --> SDK
     AG --> HM
     AG --> SS
     HM --> DB
@@ -80,7 +80,7 @@ graph TB
     FMT -.->|response| TG
 
     style DB fill:#f9f,stroke:#333,stroke-width:2px
-    style CLI fill:#ff9,stroke:#333,stroke-width:2px
+    style SDK fill:#ff9,stroke:#333,stroke-width:2px
     style AP fill:#9ff,stroke:#333,stroke-width:2px
 ```
 
@@ -211,7 +211,7 @@ flowchart TD
 
 ## 4. Agent Lifecycle
 
-How a single Agent spawns the Claude CLI, handles I/O, parses responses, and manages timeouts.
+How a single Agent uses the SDK `query()` API, handles structured messages, and manages timeouts.
 
 ```mermaid
 flowchart TD
@@ -219,45 +219,31 @@ flowchart TD
     SANDBOX --> WRITE_RULES[Write CLAUDE.md<br/>Safety rules to sandbox]
 
     subgraph CALL["agent.call(prompt)"]
-        RETRY_WRAPPER[callWithRetry wrapper<br/>Max N retries] --> BUILD_ARGS
+        RETRY_WRAPPER[callWithRetry wrapper<br/>Max N retries] --> BUILD_OPTS
 
-        BUILD_ARGS["buildArgs(prompt)<br/>claude --print --model opus<br/>--output-format json"] --> ADD_FLAGS
+        BUILD_OPTS["buildSdkOptions()<br/>cwd, env, resume, mcpServers<br/>permissionMode, effort"] --> QUERY
 
-        ADD_FLAGS{Optional flags?}
-        ADD_FLAGS -->|resume| ADD_RESUME["--resume sessionId"]
-        ADD_FLAGS -->|system prompt| ADD_SYSTEM["--system-prompt '...'"]
-        ADD_FLAGS -->|MCP| ADD_MCP["--mcp-config path"]
-        ADD_FLAGS -->|skip perms| ADD_SKIP["--dangerously-skip-permissions"]
+        QUERY["query({ prompt, options })<br/>SDK async iterator<br/>Yields SDKMessage stream"] --> PROCESS
 
-        ADD_RESUME --> SPAWN
-        ADD_SYSTEM --> SPAWN
-        ADD_MCP --> SPAWN
-        ADD_SKIP --> SPAWN
+        PROCESS["processMessage(msg)<br/>Extract session ID, text,<br/>token usage, log tool calls"] --> TIMEOUT
 
-        SPAWN["Bun.spawn(args)<br/>cwd: sandboxDir<br/>env: buildSpawnEnv(token)"] --> PARALLEL
+        TIMEOUT{"AbortController + setTimeout<br/>max(config, 5min)"}
+        TIMEOUT -->|Aborted| THROW_TIMEOUT["throw TimeoutError<br/>Never retried"]
+        TIMEOUT -->|Complete| RESULT{Result type?}
 
-        PARALLEL["Promise.all<br/>Read stdout + stderr<br/>in parallel"] --> RACE
+        RESULT -->|success| EXTRACT["Extract:<br/>• text (result)<br/>• sessionId<br/>• inputTokens<br/>• outputTokens"]
+        RESULT -->|error| CHECK_TRANSIENT{Transient error?}
 
-        RACE{"Race with timeout<br/>max(config, 5min)"}
-        RACE -->|Timeout| KILL["proc.kill('SIGTERM')<br/>throw TimeoutError"]
-        RACE -->|Complete| EXIT_CODE{Exit code?}
-
-        EXIT_CODE -->|0| PARSE["parseResponse(stdout)<br/>Extract JSON result"]
-        EXIT_CODE -->|≠0| CHECK_TRANSIENT{Transient error?}
-
-        PARSE --> EXTRACT["Extract:<br/>• text (result)<br/>• sessionId<br/>• inputTokens<br/>• outputTokens"]
         EXTRACT --> RETURN([Return AgentCallResult])
 
-        CHECK_TRANSIENT -->|"429, 503, ETIMEDOUT<br/>ECONNRESET"| BACKOFF["Exponential backoff<br/>delay × 2^attempt<br/>cap 30s"]
+        CHECK_TRANSIENT -->|"429, 503, ETIMEDOUT<br/>ECONNRESET, rate_limit"| BACKOFF["Exponential backoff<br/>delay × 2^attempt<br/>cap 30s"]
         CHECK_TRANSIENT -->|Permanent| THROW[Throw error]
 
         BACKOFF --> RETRY_WRAPPER
-
-        KILL --> THROW_TIMEOUT[Throw TimeoutError<br/>Never retried]
     end
 
     subgraph CLEANUP["Lifecycle End"]
-        ABORT["agent.abort()<br/>Kill active process"]
+        ABORT["agent.abort()<br/>AbortController.abort()"]
         CLEAN["agent.cleanup()<br/>rm -rf sandboxDir"]
     end
 
@@ -265,8 +251,8 @@ flowchart TD
     RETURN --> DONE([Agent ready for next call])
 
     style CALL fill:#ffe,stroke:#333,stroke-width:2px
-    style SPAWN fill:#ff9,stroke:#333,stroke-width:2px
-    style KILL fill:#f66,stroke:#333
+    style QUERY fill:#ff9,stroke:#333,stroke-width:2px
+    style THROW_TIMEOUT fill:#f66,stroke:#333
 ```
 
 ---
@@ -278,7 +264,7 @@ Master/worker concurrency model with acquire/release semantics.
 ```mermaid
 flowchart TD
     subgraph INIT["Pool Initialization"]
-        CREATE_POOL([new AgentPool<br/>chatId, primaryAgent, config]) --> MASTER[Master slot<br/>Synapse 🤖 SYN-01<br/>Uses --resume]
+        CREATE_POOL([new AgentPool<br/>chatId, primaryAgent, config]) --> MASTER[Master slot<br/>Synapse 🤖 SYN-01<br/>SDK resume]
         CREATE_POOL --> WORKERS["Create N-1 workers<br/>Morpheus, Trinity, Tank...<br/>Each with unique identity"]
     end
 
@@ -434,27 +420,23 @@ Multi-layer error handling: transient retries, session error recovery, and timeo
 
 ```mermaid
 flowchart TD
-    CALL([Agent.call]) --> SPAWN[Bun.spawn claude CLI]
+    CALL([Agent.call]) --> QUERY_CALL["SDK query()<br/>async iterator"]
 
-    SPAWN --> RACE{"Race:<br/>process vs timeout"}
+    QUERY_CALL --> RACE{"AbortController:<br/>query vs timeout"}
 
-    RACE -->|Timeout exceeded| KILL["Kill process SIGTERM<br/>TimeoutError"]
+    RACE -->|Timeout exceeded| KILL["AbortController.abort()<br/>TimeoutError"]
     KILL --> NEVER_RETRY[/"❌ Never retried<br/>Reply: Timeout"/]
 
-    RACE -->|Process exits| EXIT{Exit code}
+    RACE -->|Complete| RESULT{Result message}
 
-    EXIT -->|0| PARSE[Parse JSON response]
-    PARSE --> CHECK_JSON{Valid JSON?}
-    CHECK_JSON -->|Yes| SUCCESS([Return AgentCallResult])
-    CHECK_JSON -->|No| FALLBACK[Use raw stdout as text]
-    FALLBACK --> SUCCESS
+    RESULT -->|success| SUCCESS([Return AgentCallResult])
 
-    EXIT -->|≠ 0| CLASSIFY{Error type?}
+    RESULT -->|error| CLASSIFY{Error type?}
 
-    CLASSIFY -->|"Transient<br/>429 Rate Limit<br/>503 Overloaded<br/>ETIMEDOUT<br/>ECONNRESET<br/>EPIPE"| RETRY_CHECK{Attempts < maxRetries?}
+    CLASSIFY -->|"Transient<br/>429 Rate Limit<br/>503 Overloaded<br/>ETIMEDOUT<br/>ECONNRESET<br/>rate_limit"| RETRY_CHECK{Attempts < maxRetries?}
 
     RETRY_CHECK -->|Yes| BACKOFF["Wait: delay × 2^attempt<br/>Cap: 30 seconds<br/>1s → 2s → 4s → 8s → ..."]
-    BACKOFF --> SPAWN
+    BACKOFF --> QUERY_CALL
 
     RETRY_CHECK -->|No| PERMANENT_FAIL[Throw: max retries exceeded]
 
@@ -637,8 +619,8 @@ flowchart TD
     end
 
     subgraph RUNTIME["Agent Runtime"]
-        SPAWN["Bun.spawn claude<br/>cwd: sandboxDir"] --> ENV["buildSpawnEnv(token)<br/>Cached per token<br/>Strips sensitive vars"]
-        ENV --> EXECUTE["Claude CLI executes<br/>within sandbox directory"]
+        QUERY_SDK["SDK query()<br/>cwd: sandboxDir"] --> ENV["buildAgentEnv(token)<br/>Cached per token<br/>Strips sensitive vars"]
+        ENV --> EXECUTE["SDK executes Claude<br/>within sandbox directory"]
         EXECUTE --> FILES["Files created in sandbox"]
         FILES --> OUTPUT{In output/ dir?}
         OUTPUT -->|Yes| DELIVER["Auto-delivered to user<br/>via Telegram"]

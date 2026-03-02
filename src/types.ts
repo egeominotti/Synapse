@@ -46,12 +46,8 @@ export interface AgentConfig {
   initialRetryDelayMs: number
   /** Path to the SQLite database file */
   dbPath: string
-  /** If true, passes --dangerously-skip-permissions to claude CLI */
+  /** If true, bypasses permission prompts in the SDK */
   skipPermissions: boolean
-  /** If true, each claude spawn runs inside a Docker container */
-  useDocker: boolean
-  /** Docker image to use when useDocker is true */
-  dockerImage: string
   /** Optional system prompt that defines the agent's persona and capabilities */
   systemPrompt?: string
   /** Path to MCP configuration file (auto-generated if not set) */
@@ -134,8 +130,6 @@ export type RuntimeConfigKey =
   | "retry_delay_ms"
   | "skip_permissions"
   | "log_level"
-  | "docker"
-  | "docker_image"
   | "max_concurrent"
   | "collaboration"
   | "max_team_agents"

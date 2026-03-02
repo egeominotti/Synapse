@@ -1,7 +1,7 @@
 import { describe, it, expect } from "bun:test"
 import { existsSync } from "fs"
 import { Agent, TimeoutError, isTransientError } from "../src/agent"
-import { buildSpawnEnv } from "../src/sandbox"
+import { buildAgentEnv } from "../src/sandbox"
 import type { AgentConfig } from "../src/types"
 
 const baseConfig: AgentConfig = {
@@ -11,8 +11,6 @@ const baseConfig: AgentConfig = {
   initialRetryDelayMs: 100,
   dbPath: ":memory:",
   skipPermissions: true,
-  useDocker: false,
-  dockerImage: "test:latest",
   systemPrompt: undefined,
   maxConcurrentPerChat: 1,
   collaboration: true,
@@ -93,17 +91,17 @@ describe("isTransientError", () => {
 })
 
 // ---------------------------------------------------------------------------
-// buildSpawnEnv
+// buildAgentEnv
 // ---------------------------------------------------------------------------
 
-describe("buildSpawnEnv", () => {
+describe("buildAgentEnv", () => {
   it("injects CLAUDE_CODE_OAUTH_TOKEN", () => {
-    const env = buildSpawnEnv("my-token")
+    const env = buildAgentEnv("my-token")
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("my-token")
   })
 
   it("returns only string values", () => {
-    const env = buildSpawnEnv("tok")
+    const env = buildAgentEnv("tok")
     for (const [, value] of Object.entries(env)) {
       expect(typeof value).toBe("string")
     }
@@ -253,10 +251,8 @@ describe("Agent.buildSdkOptions", () => {
   it("combines all options correctly for worker agent", () => {
     const agent = new Agent(baseConfig)
     agent.allowedTools = "Bash Read Write"
-    agent.workerMode = true
     const opts = agent.buildSdkOptions()
     expect(opts.allowedTools).toEqual(["Bash", "Read", "Write"])
-    // workerMode doesn't affect SDK options (no slash commands in SDK)
     expect(opts.effort).toBeUndefined()
     agent.cleanup()
   })

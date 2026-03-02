@@ -130,11 +130,9 @@ export class AgentPool {
     }
   }
 
-  /** Create a worker agent — all tools, no session persistence, no plugins. */
+  /** Create a worker agent — all tools, fresh session. */
   private createWorker(): Agent {
-    const worker = new Agent(this.config)
-    worker.workerMode = true
-    return worker
+    return new Agent(this.config)
   }
 
   /** Inject initial conversation context into a worker's system prompt (first call only). */

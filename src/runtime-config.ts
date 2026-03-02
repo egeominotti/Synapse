@@ -56,18 +56,6 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
       enum: ["DEBUG", "INFO", "WARN", "ERROR"],
     },
     {
-      key: "docker",
-      type: "boolean",
-      description: "Run in Docker container",
-      defaultValue: String(defaults.useDocker),
-    },
-    {
-      key: "docker_image",
-      type: "string",
-      description: "Docker image",
-      defaultValue: defaults.dockerImage,
-    },
-    {
       key: "max_concurrent",
       type: "number",
       description: "Max concurrent agents per chat (1 = serial)",
@@ -153,10 +141,6 @@ export class RuntimeConfig {
         return String(this.config.skipPermissions)
       case "log_level":
         return Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO"
-      case "docker":
-        return String(this.config.useDocker)
-      case "docker_image":
-        return this.config.dockerImage
       case "max_concurrent":
         return String(this.config.maxConcurrentPerChat)
       case "collaboration":
@@ -279,12 +263,6 @@ export class RuntimeConfig {
       case "log_level":
         logger.setMinLevel(value as LogLevel)
         Bun.env.CLAUDE_AGENT_LOG_LEVEL = value
-        break
-      case "docker":
-        this.config.useDocker = value === "true"
-        break
-      case "docker_image":
-        this.config.dockerImage = value
         break
       case "max_concurrent":
         this.config.maxConcurrentPerChat = Number(value)

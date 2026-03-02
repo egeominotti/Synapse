@@ -48,8 +48,6 @@ export function loadConfig(): AgentConfig {
     initialRetryDelayMs: getOptionalEnvInt("CLAUDE_AGENT_RETRY_DELAY_MS", DEFAULT_INITIAL_RETRY_DELAY_MS, 100, 30_000),
     dbPath: Bun.env.CLAUDE_AGENT_DB_PATH ?? DEFAULT_DB_PATH,
     skipPermissions: (Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS ?? "1") === "1",
-    useDocker: Bun.env.CLAUDE_AGENT_DOCKER === "1",
-    dockerImage: Bun.env.CLAUDE_AGENT_DOCKER_IMAGE ?? "claude-agent:latest",
     systemPrompt: Bun.env.CLAUDE_AGENT_SYSTEM_PROMPT || undefined,
     mcpConfigPath: Bun.env.CLAUDE_AGENT_MCP_CONFIG_PATH || undefined,
     whisperModelPath: Bun.env.WHISPER_MODEL_PATH || undefined,

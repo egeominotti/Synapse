@@ -11,7 +11,7 @@ export {
   createSandbox,
   cleanupSandbox,
   listSandboxFiles,
-  buildSpawnEnv,
+  buildAgentEnv,
   generateSandboxRules,
   MIME_TYPES,
 } from "./sandbox"

@@ -11,17 +11,17 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.63",
-    "bunqueue": "2.5.4",
-    "grammy": "^1.40.0",
+    "bunqueue": "2.5.9",
+    "grammy": "^1.41.1",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "bun-types": "^1.3.9",
-    "eslint": "^10.0.1",
+    "bun-types": "^1.3.10",
+    "eslint": "^10.0.2",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
-    "typescript-eslint": "^8.56.0"
+    "typescript-eslint": "^8.56.1"
   }
 }

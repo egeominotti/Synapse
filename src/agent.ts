@@ -15,11 +15,12 @@ import type {
   SDKResultError,
   SDKSystemMessage,
   SDKAssistantMessage,
+  SDKPartialAssistantMessage,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { AgentConfig, AgentCallResult, TokenUsage, StreamEvent } from "./types"
 import { logger } from "./logger"
-import { createSandbox, cleanupSandbox, listSandboxFiles, buildSpawnEnv, MIME_TYPES } from "./sandbox"
+import { createSandbox, cleanupSandbox, listSandboxFiles, buildAgentEnv, MIME_TYPES } from "./sandbox"
 import { buildMcpServers } from "./mcp-config"
 
 /** Hard safety timeout: aborts query even if timeout_ms = 0 (disabled). Prevents infinite hangs. */
@@ -114,9 +115,6 @@ export class Agent {
   /** When set, restricts tool access (e.g. "Bash Read Write Edit"). */
   allowedTools: string | null = null
 
-  /** When true, worker mode (no slash commands needed in SDK mode). */
-  workerMode: boolean = false
-
   /** Effort level: "low", "medium", "high". Null = SDK default. */
   effort: "low" | "medium" | "high" | null = null
 
@@ -154,7 +152,7 @@ export class Agent {
   buildSdkOptions(): Partial<SdkOptions> {
     const opts: Partial<SdkOptions> = {
       cwd: this.sandboxDir,
-      env: buildSpawnEnv(this.config.token),
+      env: buildAgentEnv(this.config.token),
     }
 
     // Permission mode
@@ -192,7 +190,7 @@ export class Agent {
   }
 
   // ---------------------------------------------------------------------------
-  // Retry logic (unchanged)
+  // Retry logic
   // ---------------------------------------------------------------------------
 
   private async callWithRetry(fn: () => Promise<AgentCallResult>): Promise<AgentCallResult> {
@@ -221,6 +219,49 @@ export class Agent {
   }
 
   // ---------------------------------------------------------------------------
+  // Shared query lifecycle
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run a query with timeout, abort, session tracking, and duration measurement.
+   * The iterateFn receives each SDK message and can accumulate results.
+   */
+  private async runQuery(
+    prompt: string | AsyncIterable<SDKUserMessage>,
+    extraOpts: Partial<SdkOptions>,
+    iterateFn: (msg: SDKMessage, state: QueryState) => void
+  ): Promise<QueryState> {
+    const startTime = performance.now()
+    this.abortController = new AbortController()
+    const opts = { ...this.buildSdkOptions(), ...extraOpts, abortController: this.abortController }
+
+    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
+    const timeoutHandle = setTimeout(() => this.abortController?.abort(), effectiveTimeout)
+
+    const state: QueryState = { resultText: "", sessionId: this.sessionId, tokenUsage: null }
+
+    try {
+      for await (const msg of query({ prompt, options: opts as SdkOptions })) {
+        this.processMessage(msg, state)
+        iterateFn(msg, state)
+      }
+    } catch (err) {
+      if (this.abortController?.signal.aborted) throw new TimeoutError(effectiveTimeout)
+      throw err
+    } finally {
+      clearTimeout(timeoutHandle)
+      this.abortController = null
+    }
+
+    if (state.sessionId && state.sessionId !== this.sessionId) {
+      this.setSessionId(state.sessionId)
+    }
+
+    state.durationMs = Math.round(performance.now() - startTime)
+    return state
+  }
+
+  // ---------------------------------------------------------------------------
   // Core query execution (text)
   // ---------------------------------------------------------------------------
 
@@ -232,40 +273,21 @@ export class Agent {
       promptLength: prompt.length,
     })
 
-    const startTime = performance.now()
-    this.abortController = new AbortController()
-    const opts = { ...this.buildSdkOptions(), abortController: this.abortController }
+    const state = await this.runQuery(prompt, {}, () => {})
 
-    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
-    const timeoutHandle = setTimeout(() => this.abortController?.abort(), effectiveTimeout)
-
-    let resultText = ""
-    let sessionId: string | null = this.sessionId
-    let tokenUsage: TokenUsage | null = null
-
-    try {
-      for await (const msg of query({ prompt, options: opts as SdkOptions })) {
-        ;({ resultText, sessionId, tokenUsage } = this.processMessage(msg, resultText, sessionId, tokenUsage))
-      }
-    } catch (err) {
-      if (this.abortController?.signal.aborted) throw new TimeoutError(effectiveTimeout)
-      throw err
-    } finally {
-      clearTimeout(timeoutHandle)
-      this.abortController = null
-    }
-
-    if (sessionId && sessionId !== this.sessionId) this.setSessionId(sessionId)
-
-    const durationMs = Math.round(performance.now() - startTime)
     logger.info("Agent call completed", {
       sessionId: this.sessionId?.slice(0, 16) ?? null,
-      durationMs,
-      resultLength: resultText.length,
-      tokens: tokenUsage ? `${tokenUsage.inputTokens}in/${tokenUsage.outputTokens}out` : null,
+      durationMs: state.durationMs,
+      resultLength: state.resultText.length,
+      tokens: state.tokenUsage ? `${state.tokenUsage.inputTokens}in/${state.tokenUsage.outputTokens}out` : null,
     })
 
-    return { text: resultText, sessionId: this.sessionId, tokenUsage, durationMs }
+    return {
+      text: state.resultText,
+      sessionId: this.sessionId,
+      tokenUsage: state.tokenUsage,
+      durationMs: state.durationMs!,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -275,58 +297,24 @@ export class Agent {
   private async executeQueryStream(prompt: string, onEvent: (event: StreamEvent) => void): Promise<AgentCallResult> {
     logger.debug("Agent query (streaming)", { hasSession: !!this.sessionId, promptLength: prompt.length })
 
-    const startTime = performance.now()
-    this.abortController = new AbortController()
-    const opts = {
-      ...this.buildSdkOptions(),
-      abortController: this.abortController,
-      includePartialMessages: true,
-    }
-
-    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
-    const timeoutHandle = setTimeout(() => this.abortController?.abort(), effectiveTimeout)
-
-    let resultText = ""
     let accumulated = ""
-    let sessionId: string | null = this.sessionId
-    let tokenUsage: TokenUsage | null = null
 
-    try {
-      for await (const msg of query({ prompt, options: opts as SdkOptions })) {
-        // Handle streaming partial events for text deltas
-        if (msg.type === "stream_event") {
-          const event = (msg as { event: Record<string, unknown> }).event
-          if (
-            event?.type === "content_block_delta" &&
-            typeof event.delta === "object" &&
-            event.delta !== null &&
-            (event.delta as Record<string, unknown>).type === "text_delta"
-          ) {
-            const delta = (event.delta as Record<string, unknown>).text as string
-            accumulated += delta
-            onEvent({ type: "text", text: delta })
-          }
+    const state = await this.runQuery(prompt, { includePartialMessages: true }, (msg) => {
+      if (msg.type === "stream_event") {
+        const partial = msg as SDKPartialAssistantMessage
+        const event = partial.event as { type?: string; delta?: { type?: string; text?: string } }
+        if (event.type === "content_block_delta" && event.delta?.type === "text_delta" && event.delta.text) {
+          accumulated += event.delta.text
+          onEvent({ type: "text", text: event.delta.text })
         }
-
-        // Process standard messages (assistant, system, result)
-        ;({ resultText, sessionId, tokenUsage } = this.processMessage(msg, resultText, sessionId, tokenUsage))
       }
-    } catch (err) {
-      if (this.abortController?.signal.aborted) throw new TimeoutError(effectiveTimeout)
-      throw err
-    } finally {
-      clearTimeout(timeoutHandle)
-      this.abortController = null
-    }
+    })
 
-    if (sessionId && sessionId !== this.sessionId) this.setSessionId(sessionId)
-
-    const durationMs = Math.round(performance.now() - startTime)
     const result: AgentCallResult = {
-      text: resultText || accumulated,
+      text: state.resultText || accumulated,
       sessionId: this.sessionId,
-      tokenUsage,
-      durationMs,
+      tokenUsage: state.tokenUsage,
+      durationMs: state.durationMs!,
     }
 
     onEvent({ type: "done", result })
@@ -340,14 +328,6 @@ export class Agent {
   private async executeQueryWithImage(mediaType: string, base64Data: string, prompt: string): Promise<AgentCallResult> {
     logger.debug("Agent query (vision)", { hasSession: !!this.sessionId, mediaType })
 
-    const startTime = performance.now()
-    this.abortController = new AbortController()
-    const opts = { ...this.buildSdkOptions(), abortController: this.abortController }
-
-    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
-    const timeoutHandle = setTimeout(() => this.abortController?.abort(), effectiveTimeout)
-
-    // Build async generator that yields a single user message with image content
     async function* imagePrompt(): AsyncGenerator<SDKUserMessage> {
       yield {
         type: "user",
@@ -370,33 +350,21 @@ export class Agent {
       } as SDKUserMessage
     }
 
-    let resultText = ""
-    let sessionId: string | null = this.sessionId
-    let tokenUsage: TokenUsage | null = null
+    const state = await this.runQuery(imagePrompt(), {}, () => {})
 
-    try {
-      for await (const msg of query({ prompt: imagePrompt(), options: opts as SdkOptions })) {
-        ;({ resultText, sessionId, tokenUsage } = this.processMessage(msg, resultText, sessionId, tokenUsage))
-      }
-    } catch (err) {
-      if (this.abortController?.signal.aborted) throw new TimeoutError(effectiveTimeout)
-      throw err
-    } finally {
-      clearTimeout(timeoutHandle)
-      this.abortController = null
-    }
-
-    if (sessionId && sessionId !== this.sessionId) this.setSessionId(sessionId)
-
-    const durationMs = Math.round(performance.now() - startTime)
     logger.info("Agent call completed", {
       sessionId: this.sessionId?.slice(0, 16) ?? null,
-      durationMs,
-      resultLength: resultText.length,
-      tokens: tokenUsage ? `${tokenUsage.inputTokens}in/${tokenUsage.outputTokens}out` : null,
+      durationMs: state.durationMs,
+      resultLength: state.resultText.length,
+      tokens: state.tokenUsage ? `${state.tokenUsage.inputTokens}in/${state.tokenUsage.outputTokens}out` : null,
     })
 
-    return { text: resultText, sessionId: this.sessionId, tokenUsage, durationMs }
+    return {
+      text: state.resultText,
+      sessionId: this.sessionId,
+      tokenUsage: state.tokenUsage,
+      durationMs: state.durationMs!,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -404,15 +372,13 @@ export class Agent {
   // ---------------------------------------------------------------------------
 
   /** Process a single SDK message — extracts session ID, result text, token usage, logs tool calls. */
-  private processMessage(
-    msg: SDKMessage,
-    resultText: string,
-    sessionId: string | null,
-    tokenUsage: TokenUsage | null
-  ): { resultText: string; sessionId: string | null; tokenUsage: TokenUsage | null } {
+  private processMessage(msg: SDKMessage, state: QueryState): void {
     // System init: capture session ID
-    if (msg.type === "system" && (msg as SDKSystemMessage).subtype === "init") {
-      sessionId = (msg as SDKSystemMessage).session_id
+    if (msg.type === "system") {
+      const sysMsg = msg as SDKSystemMessage
+      if (sysMsg.subtype === "init") {
+        state.sessionId = sysMsg.session_id
+      }
     }
 
     // Assistant messages: log MCP tool calls
@@ -431,7 +397,6 @@ export class Agent {
         }
       }
 
-      // Check for SDK-level errors on the assistant message
       if (assistantMsg.error) {
         logger.warn("Assistant message error", { error: assistantMsg.error })
       }
@@ -440,12 +405,12 @@ export class Agent {
     // Result: extract final text, usage, session ID
     if (msg.type === "result") {
       const resultMsg = msg as SDKResultMessage
-      sessionId = resultMsg.session_id
+      state.sessionId = resultMsg.session_id
 
       if (resultMsg.subtype === "success") {
         const success = resultMsg as SDKResultSuccess
-        resultText = success.result
-        tokenUsage = {
+        state.resultText = success.result
+        state.tokenUsage = {
           inputTokens: success.usage.input_tokens ?? 0,
           outputTokens: success.usage.output_tokens ?? 0,
         }
@@ -455,7 +420,13 @@ export class Agent {
         throw new Error(errorMsg)
       }
     }
-
-    return { resultText, sessionId, tokenUsage }
   }
+}
+
+/** Mutable state accumulated during a query lifecycle. */
+interface QueryState {
+  resultText: string
+  sessionId: string | null
+  tokenUsage: TokenUsage | null
+  durationMs?: number
 }
