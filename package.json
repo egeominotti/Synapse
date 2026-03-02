@@ -10,6 +10,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.63",
     "bunqueue": "2.5.4",
     "grammy": "^1.40.0",
     "pino": "^10.3.1",

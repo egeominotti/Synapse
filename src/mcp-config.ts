@@ -18,6 +18,20 @@ interface McpConfig {
   mcpServers: Record<string, McpServerConfig>
 }
 
+/** Build MCP servers config for SDK inline use. */
+export function buildMcpServers(dbDir?: string): Record<string, McpServerConfig> {
+  const env: Record<string, string> = {}
+  if (dbDir) env.DATA_PATH = join(dbDir, "bunqueue.db")
+
+  return {
+    bunqueue: {
+      command: "bunx",
+      args: ["bunqueue-mcp"],
+      env,
+    },
+  }
+}
+
 /** Build the MCP config object with bunqueue server. */
 function buildMcpConfig(dbDir?: string): McpConfig {
   const env: Record<string, string> = {}

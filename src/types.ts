@@ -38,16 +38,6 @@ export interface SessionStats {
   totalOutputTokens: number
 }
 
-/** The raw JSON structure returned by `claude --print --output-format json` */
-export interface ClaudeResponse {
-  session_id?: string
-  result?: string
-  usage?: {
-    input_tokens?: number
-    output_tokens?: number
-  }
-}
-
 /** Configuration for the agent */
 export interface AgentConfig {
   token: string

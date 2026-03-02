@@ -71,6 +71,14 @@ describe("isTransientError", () => {
     expect(isTransientError(new Error("502 Bad Gateway"))).toBe(true)
   })
 
+  it("returns true for rate_limit (SDK error)", () => {
+    expect(isTransientError(new Error("rate_limit"))).toBe(true)
+  })
+
+  it("returns true for server_error (SDK error)", () => {
+    expect(isTransientError(new Error("server_error"))).toBe(true)
+  })
+
   it("returns false for TimeoutError", () => {
     expect(isTransientError(new TimeoutError(5000))).toBe(false)
   })
@@ -103,330 +111,154 @@ describe("buildSpawnEnv", () => {
 })
 
 // ---------------------------------------------------------------------------
-// Agent.parseResponse
+// Agent.buildSdkOptions
 // ---------------------------------------------------------------------------
 
-describe("Agent.parseResponse", () => {
-  const agent = new Agent(baseConfig)
-
-  it("parses standard JSON response", () => {
-    const json = JSON.stringify({
-      session_id: "sess-123",
-      result: "Hello world",
-      usage: { input_tokens: 10, output_tokens: 20 },
-    })
-
-    const result = agent.parseResponse(json)
-    expect(result.text).toBe("Hello world")
-    expect(result.sessionId).toBe("sess-123")
-    expect(result.tokenUsage).toEqual({ inputTokens: 10, outputTokens: 20 })
-  })
-
-  it("parses JSON without usage", () => {
-    const json = JSON.stringify({
-      session_id: "sess-456",
-      result: "No usage info",
-    })
-
-    const result = agent.parseResponse(json)
-    expect(result.text).toBe("No usage info")
-    expect(result.sessionId).toBe("sess-456")
-    expect(result.tokenUsage).toBeNull()
-  })
-
-  it("returns raw text on invalid JSON", () => {
-    const result = agent.parseResponse("not valid json at all")
-    expect(result.text).toBe("not valid json at all")
-    expect(result.tokenUsage).toBeNull()
-  })
-
-  it("parses stream-json with result event", () => {
-    const lines = [
-      JSON.stringify({ type: "system", message: "Starting..." }),
-      JSON.stringify({ type: "assistant", message: "thinking..." }),
-      JSON.stringify({
-        type: "result",
-        session_id: "sess-stream",
-        result: "Stream result",
-        usage: { input_tokens: 50, output_tokens: 100 },
-      }),
-    ].join("\n")
-
-    const result = agent.parseResponse(lines)
-    expect(result.text).toBe("Stream result")
-    expect(result.sessionId).toBe("sess-stream")
-    expect(result.tokenUsage).toEqual({ inputTokens: 50, outputTokens: 100 })
-  })
-
-  it("stream-json without result event returns raw text", () => {
-    const lines = [
-      JSON.stringify({ type: "system", message: "Starting..." }),
-      JSON.stringify({ type: "assistant", message: "thinking..." }),
-    ].join("\n")
-
-    const result = agent.parseResponse(lines)
-    expect(result.text).toBe(lines.trim())
-    expect(result.tokenUsage).toBeNull()
-  })
-
-  it("parses JSON with result but no session_id", () => {
-    const json = JSON.stringify({ result: "No session" })
-    const result = agent.parseResponse(json)
-    expect(result.text).toBe("No session")
-  })
-
-  it("falls back to raw text when result field is missing", () => {
-    const json = JSON.stringify({ session_id: "sess-no-result" })
-    const result = agent.parseResponse(json)
-    expect(result.text).toBe(json)
-  })
-
-  it("parses stream-json with tool_use events without breaking result", () => {
-    const lines = [
-      JSON.stringify({ type: "system", message: "Starting..." }),
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [
-            {
-              type: "tool_use",
-              id: "tool_abc123",
-              name: "bunqueue_add_job",
-              input: { queue: "synapse-jobs", data: { chatId: 42, prompt: "test" } },
-            },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: "result",
-        session_id: "sess-tools",
-        result: "Job scheduled!",
-        usage: { input_tokens: 100, output_tokens: 50 },
-      }),
-    ].join("\n")
-
-    const result = agent.parseResponse(lines)
-    expect(result.text).toBe("Job scheduled!")
-    expect(result.sessionId).toBe("sess-tools")
-    expect(result.tokenUsage).toEqual({ inputTokens: 100, outputTokens: 50 })
-  })
-
-  it("parses stream-json with multiple tool_use events", () => {
-    const lines = [
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "tool_use", id: "t1", name: "bunqueue_add_job", input: {} }],
-        },
-      }),
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [{ type: "tool_use", id: "t2", name: "bunqueue_list_crons", input: {} }],
-        },
-      }),
-      JSON.stringify({
-        type: "result",
-        session_id: "sess-multi-tool",
-        result: "Done",
-      }),
-    ].join("\n")
-
-    const result = agent.parseResponse(lines)
-    expect(result.text).toBe("Done")
-    expect(result.sessionId).toBe("sess-multi-tool")
-  })
-
-  it("handles stream-json with mixed text and tool_use blocks", () => {
-    const lines = [
-      JSON.stringify({
-        type: "assistant",
-        message: {
-          role: "assistant",
-          content: [
-            { type: "text", text: "Let me schedule that..." },
-            { type: "tool_use", id: "t1", name: "bunqueue_add_cron", input: { pattern: "0 9 * * *" } },
-          ],
-        },
-      }),
-      JSON.stringify({
-        type: "result",
-        session_id: "sess-mixed",
-        result: "Cron scheduled at 9am daily",
-      }),
-    ].join("\n")
-
-    const result = agent.parseResponse(lines)
-    expect(result.text).toBe("Cron scheduled at 9am daily")
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Agent.buildArgs
-// ---------------------------------------------------------------------------
-
-describe("Agent.buildArgs", () => {
-  it("builds basic args with prompt", () => {
+describe("Agent.buildSdkOptions", () => {
+  it("sets cwd to sandboxDir", () => {
     const agent = new Agent(baseConfig)
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("claude")
-    expect(args).toContain("--print")
-    expect(args).toContain("--output-format")
-    expect(args).toContain("json")
-    expect(args).toContain("--dangerously-skip-permissions")
-    expect(args).toContain("-p")
-    expect(args).toContain("hello")
+    const opts = agent.buildSdkOptions()
+    expect(opts.cwd).toBe(agent.sandboxDir)
+    agent.cleanup()
   })
 
-  it("includes --resume when sessionId is set", () => {
+  it("sets bypassPermissions when skipPermissions is true", () => {
     const agent = new Agent(baseConfig)
-    agent.setSessionId("sess-build")
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--resume")
-    expect(args).toContain("sess-build")
+    const opts = agent.buildSdkOptions()
+    expect(opts.permissionMode).toBe("bypassPermissions")
+    expect(opts.allowDangerouslySkipPermissions).toBe(true)
+    agent.cleanup()
   })
 
-  it("includes --system-prompt on new session", () => {
-    const agent = new Agent({ ...baseConfig, systemPrompt: "Be helpful" })
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--system-prompt")
-    expect(args).toContain("Be helpful")
-  })
-
-  it("does not include --system-prompt when resuming", () => {
-    const agent = new Agent({ ...baseConfig, systemPrompt: "Be helpful" })
-    agent.setSessionId("sess-existing")
-    const args = agent.buildArgs("hello")
-    expect(args).not.toContain("--system-prompt")
-    expect(args).toContain("--resume")
-  })
-
-  it("omits --dangerously-skip-permissions when disabled", () => {
+  it("does not set bypassPermissions when skipPermissions is false", () => {
     const agent = new Agent({ ...baseConfig, skipPermissions: false })
-    const args = agent.buildArgs("hello")
-    expect(args).not.toContain("--dangerously-skip-permissions")
+    const opts = agent.buildSdkOptions()
+    expect(opts.permissionMode).toBeUndefined()
+    expect(opts.allowDangerouslySkipPermissions).toBeUndefined()
+    agent.cleanup()
   })
 
-  it("uses stream-json format with --verbose", () => {
-    const agent = new Agent(baseConfig)
-    const args = agent.buildArgs(null, "stream-json")
-    expect(args).toContain("stream-json")
-    expect(args).toContain("--verbose")
-    expect(args).not.toContain("hello")
-  })
-
-  it("does not include prompt when null", () => {
-    const agent = new Agent(baseConfig)
-    const args = agent.buildArgs(null)
-    const lastArg = args[args.length - 1]
-    expect(lastArg).not.toBe(null)
-    // Last arg should be a flag, not a prompt
-    expect(["json", "--dangerously-skip-permissions"]).toContain(lastArg)
-  })
-
-  it("includes --mcp-config when set", () => {
-    const agent = new Agent({ ...baseConfig, mcpConfigPath: "/tmp/mcp.json" })
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--mcp-config")
-    expect(args).toContain("/tmp/mcp.json")
-  })
-
-  it("includes --tools '' when disableTools is true", () => {
+  it("sets empty allowedTools when disableTools is true", () => {
     const agent = new Agent(baseConfig)
     agent.disableTools = true
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--tools")
-    expect(args).toContain("")
-    // Prompt must use -p flag to avoid being consumed by --tools
-    const pIndex = args.indexOf("-p")
-    expect(pIndex).toBeGreaterThan(-1)
-    expect(args[pIndex + 1]).toBe("hello")
+    const opts = agent.buildSdkOptions()
+    expect(opts.allowedTools).toEqual([])
+    agent.cleanup()
   })
 
-  it("does not include --tools when disableTools is false (default)", () => {
-    const agent = new Agent(baseConfig)
-    const args = agent.buildArgs("hello")
-    expect(args).not.toContain("--tools")
-  })
-
-  it("uses -p flag for prompt", () => {
-    const agent = new Agent(baseConfig)
-    const args = agent.buildArgs("my prompt")
-    const pIndex = args.indexOf("-p")
-    expect(pIndex).toBeGreaterThan(-1)
-    expect(args[pIndex + 1]).toBe("my prompt")
-  })
-
-  it("includes --allowed-tools when allowedTools is set", () => {
+  it("splits allowedTools string into array", () => {
     const agent = new Agent(baseConfig)
     agent.allowedTools = "Bash Read Write Edit"
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--allowed-tools")
-    expect(args).toContain("Bash Read Write Edit")
-    expect(args).not.toContain("--tools")
+    const opts = agent.buildSdkOptions()
+    expect(opts.allowedTools).toEqual(["Bash", "Read", "Write", "Edit"])
+    agent.cleanup()
   })
 
   it("disableTools takes priority over allowedTools", () => {
     const agent = new Agent(baseConfig)
     agent.disableTools = true
     agent.allowedTools = "Bash Read"
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--tools")
-    expect(args).not.toContain("--allowed-tools")
+    const opts = agent.buildSdkOptions()
+    expect(opts.allowedTools).toEqual([])
+    agent.cleanup()
   })
 
-  it("includes worker mode flags when workerMode is true", () => {
+  it("does not set allowedTools by default", () => {
     const agent = new Agent(baseConfig)
-    agent.workerMode = true
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--disable-slash-commands")
-    expect(args).not.toContain("--no-session-persistence")
+    const opts = agent.buildSdkOptions()
+    expect(opts.allowedTools).toBeUndefined()
+    agent.cleanup()
   })
 
-  it("does not include worker mode flags by default", () => {
+  it("sets resume when sessionId is set", () => {
     const agent = new Agent(baseConfig)
-    const args = agent.buildArgs("hello")
-    expect(args).not.toContain("--disable-slash-commands")
+    agent.setSessionId("sess-build")
+    const opts = agent.buildSdkOptions()
+    expect(opts.resume).toBe("sess-build")
+    expect(opts.systemPrompt).toBeUndefined()
+    agent.cleanup()
   })
 
-  it("includes --effort when effort is set", () => {
+  it("sets systemPrompt on new session", () => {
+    const agent = new Agent({ ...baseConfig, systemPrompt: "Be helpful" })
+    const opts = agent.buildSdkOptions()
+    expect(opts.systemPrompt).toBe("Be helpful")
+    expect(opts.resume).toBeUndefined()
+    agent.cleanup()
+  })
+
+  it("does not set systemPrompt when resuming", () => {
+    const agent = new Agent({ ...baseConfig, systemPrompt: "Be helpful" })
+    agent.setSessionId("sess-existing")
+    const opts = agent.buildSdkOptions()
+    expect(opts.systemPrompt).toBeUndefined()
+    expect(opts.resume).toBe("sess-existing")
+    agent.cleanup()
+  })
+
+  it("sets effort when configured", () => {
     const agent = new Agent(baseConfig)
     agent.effort = "high"
-    const args = agent.buildArgs("hello")
-    expect(args).toContain("--effort")
-    expect(args).toContain("high")
+    const opts = agent.buildSdkOptions()
+    expect(opts.effort).toBe("high")
+    agent.cleanup()
   })
 
-  it("does not include --effort by default", () => {
+  it("does not set effort by default", () => {
     const agent = new Agent(baseConfig)
-    const args = agent.buildArgs("hello")
-    expect(args).not.toContain("--effort")
+    const opts = agent.buildSdkOptions()
+    expect(opts.effort).toBeUndefined()
+    agent.cleanup()
   })
 
-  it("combines all flags correctly for master agent", () => {
+  it("includes mcpServers with bunqueue", () => {
+    const agent = new Agent(baseConfig)
+    const opts = agent.buildSdkOptions()
+    expect(opts.mcpServers).toBeDefined()
+    const bunqueue = opts.mcpServers!.bunqueue
+    expect(bunqueue).toBeDefined()
+    // bunqueue is a stdio MCP server
+    expect("command" in bunqueue).toBe(true)
+    expect((bunqueue as { command: string }).command).toBe("bunx")
+    agent.cleanup()
+  })
+
+  it("includes env with token", () => {
+    const agent = new Agent(baseConfig)
+    const opts = agent.buildSdkOptions()
+    expect(opts.env).toBeDefined()
+    expect(opts.env!.CLAUDE_CODE_OAUTH_TOKEN).toBe("test-token")
+    agent.cleanup()
+  })
+
+  it("uses overrideSystemPrompt when set", () => {
+    const agent = new Agent({ ...baseConfig, systemPrompt: "Default" })
+    agent.setSystemPrompt("Override prompt")
+    const opts = agent.buildSdkOptions()
+    expect(opts.systemPrompt).toBe("Override prompt")
+    agent.cleanup()
+  })
+
+  it("combines all options correctly for master agent", () => {
     const agent = new Agent(baseConfig)
     agent.disableTools = true
     agent.effort = "high"
-    const args = agent.buildArgs("test")
-    expect(args).toContain("--tools")
-    expect(args).toContain("--effort")
-    expect(args).toContain("high")
-    expect(args).not.toContain("--no-session-persistence")
+    const opts = agent.buildSdkOptions()
+    expect(opts.allowedTools).toEqual([])
+    expect(opts.effort).toBe("high")
+    expect(opts.permissionMode).toBe("bypassPermissions")
+    agent.cleanup()
   })
 
-  it("combines all flags correctly for worker agent", () => {
+  it("combines all options correctly for worker agent", () => {
     const agent = new Agent(baseConfig)
     agent.allowedTools = "Bash Read Write"
     agent.workerMode = true
-    const args = agent.buildArgs("test")
-    expect(args).toContain("--allowed-tools")
-    expect(args).toContain("--disable-slash-commands")
-    expect(args).not.toContain("--no-session-persistence")
-    expect(args).not.toContain("--tools")
-    expect(args).not.toContain("--effort")
+    const opts = agent.buildSdkOptions()
+    expect(opts.allowedTools).toEqual(["Bash", "Read", "Write"])
+    // workerMode doesn't affect SDK options (no slash commands in SDK)
+    expect(opts.effort).toBeUndefined()
+    agent.cleanup()
   })
 })
 
@@ -435,9 +267,10 @@ describe("Agent.buildArgs", () => {
 // ---------------------------------------------------------------------------
 
 describe("Agent.abort", () => {
-  it("does not throw when no process is running", () => {
+  it("does not throw when no query is running", () => {
     const agent = new Agent(baseConfig)
     expect(() => agent.abort()).not.toThrow()
+    agent.cleanup()
   })
 
   it("can be called multiple times safely", () => {
@@ -446,6 +279,7 @@ describe("Agent.abort", () => {
     agent.abort()
     agent.abort()
     // Should not throw
+    agent.cleanup()
   })
 })
 

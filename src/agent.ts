@@ -1,17 +1,28 @@
 /**
  * Claude Code agent.
- * Manages spawning the `claude` CLI process with retry logic,
- * timeout handling, and structured result parsing.
- * Supports both text prompts and vision (image + text) via stream-json input.
+ * Uses the @anthropic-ai/claude-agent-sdk query() API for all Claude interactions.
+ * Supports text prompts, vision (image + text), and streaming output.
  */
 
 import { existsSync } from "fs"
-import { extname } from "path"
-import type { AgentConfig, AgentCallResult, ClaudeResponse, TokenUsage, StreamEvent } from "./types"
+import { dirname, extname } from "path"
+import { query } from "@anthropic-ai/claude-agent-sdk"
+import type {
+  Options as SdkOptions,
+  SDKMessage,
+  SDKResultMessage,
+  SDKResultSuccess,
+  SDKResultError,
+  SDKSystemMessage,
+  SDKAssistantMessage,
+  SDKUserMessage,
+} from "@anthropic-ai/claude-agent-sdk"
+import type { AgentConfig, AgentCallResult, TokenUsage, StreamEvent } from "./types"
 import { logger } from "./logger"
 import { createSandbox, cleanupSandbox, listSandboxFiles, buildSpawnEnv, MIME_TYPES } from "./sandbox"
+import { buildMcpServers } from "./mcp-config"
 
-/** Hard safety timeout: kills process even if timeout_ms = 0 (disabled). Prevents infinite hangs. */
+/** Hard safety timeout: aborts query even if timeout_ms = 0 (disabled). Prevents infinite hangs. */
 const HARD_TIMEOUT_MS = 5 * 60 * 1_000 // 5 minutes
 
 /** Errors that are considered transient and safe to retry */
@@ -25,6 +36,8 @@ const TRANSIENT_PATTERNS = [
   "429",
   "503",
   "502",
+  "rate_limit",
+  "server_error",
 ]
 
 /** Distinct error class for hard timeouts — never retried */
@@ -47,8 +60,8 @@ export class Agent {
   private sessionId: string | null = null
   /** Isolated sandbox directory — Claude runs here, not in the project root */
   readonly sandboxDir: string
-  /** Currently running process — tracked so it can be killed via abort() */
-  private activeProc: ReturnType<typeof Bun.spawn> | null = null
+  /** Active AbortController — used to cancel running queries via abort() */
+  private abortController: AbortController | null = null
 
   constructor(config: AgentConfig) {
     this.config = config
@@ -66,16 +79,16 @@ export class Agent {
     cleanupSandbox(this.sandboxDir)
   }
 
-  /** Kill the currently running Claude process (if any). Unblocks pending calls. */
+  /** Cancel the currently running query (if any). Unblocks pending calls. */
   abort(): void {
-    if (this.activeProc) {
+    if (this.abortController) {
       try {
-        this.activeProc.kill()
-        logger.info("Active process killed via abort()")
+        this.abortController.abort()
+        logger.info("Active query aborted via AbortController")
       } catch {
-        /* already dead */
+        /* already aborted */
       }
-      this.activeProc = null
+      this.abortController = null
     }
   }
 
@@ -95,46 +108,92 @@ export class Agent {
 
   private overrideSystemPrompt: string | undefined | null = null
 
-  /** When true, passes `--tools ""` to disable all tool use (text-only output). */
+  /** When true, disables all tool use (text-only output). */
   disableTools: boolean = false
 
-  /** When set, passes `--allowed-tools` to restrict tool access (e.g. "Bash Read Write Edit"). */
+  /** When set, restricts tool access (e.g. "Bash Read Write Edit"). */
   allowedTools: string | null = null
 
-  /** When true, passes `--disable-slash-commands` (worker mode). Workers now keep their own sessions. */
+  /** When true, worker mode (no slash commands needed in SDK mode). */
   workerMode: boolean = false
 
-  /** Effort level: "low", "medium", "high". Null = CLI default. */
+  /** Effort level: "low", "medium", "high". Null = SDK default. */
   effort: "low" | "medium" | "high" | null = null
 
   /** Send a text prompt with retry + timeout. */
   async call(prompt: string): Promise<AgentCallResult> {
-    return this.callWithRetry(() => this.spawnText(prompt))
+    return this.callWithRetry(() => this.executeQuery(prompt))
   }
 
-  /** Send an image + optional text prompt via stream-json. */
+  /** Send an image + optional text prompt. */
   async callWithImage(imagePath: string, prompt: string): Promise<AgentCallResult> {
     if (!existsSync(imagePath)) throw new Error(`File not found: ${imagePath}`)
     const ext = extname(imagePath).toLowerCase()
     const mediaType = MIME_TYPES[ext]
     if (!mediaType) throw new Error(`Unsupported format: ${ext}. Use: ${Object.keys(MIME_TYPES).join(", ")}`)
 
-    return this.callWithRetry(() => this.spawnWithImage(imagePath, mediaType, prompt))
+    const imageData = Buffer.from(await Bun.file(imagePath).arrayBuffer()).toString("base64")
+    return this.callWithRetry(() => this.executeQueryWithImage(mediaType, imageData, prompt))
   }
 
   /** Send raw base64 image data (e.g. downloaded from Telegram CDN). */
   async callWithRawImage(mediaType: string, base64Data: string, prompt: string): Promise<AgentCallResult> {
-    return this.callWithRetry(() =>
-      this.config.useDocker
-        ? this.spawnViaDocker({ prompt, vision: { mediaType, data: base64Data } })
-        : this.spawnWithRawImage(mediaType, base64Data, prompt)
-    )
+    return this.callWithRetry(() => this.executeQueryWithImage(mediaType, base64Data, prompt))
   }
 
   /** Send a text prompt with streaming — emits text events as they arrive. */
   async callStream(prompt: string, onEvent: (event: StreamEvent) => void): Promise<AgentCallResult> {
-    return this.callWithRetry(() => this.spawnTextStream(prompt, onEvent))
+    return this.callWithRetry(() => this.executeQueryStream(prompt, onEvent))
   }
+
+  // ---------------------------------------------------------------------------
+  // SDK options builder
+  // ---------------------------------------------------------------------------
+
+  /** Build SDK query options from agent config and state. */
+  buildSdkOptions(): Partial<SdkOptions> {
+    const opts: Partial<SdkOptions> = {
+      cwd: this.sandboxDir,
+      env: buildSpawnEnv(this.config.token),
+    }
+
+    // Permission mode
+    if (this.config.skipPermissions) {
+      opts.permissionMode = "bypassPermissions"
+      opts.allowDangerouslySkipPermissions = true
+    }
+
+    // Tool control
+    if (this.disableTools) {
+      opts.allowedTools = []
+    } else if (this.allowedTools) {
+      opts.allowedTools = this.allowedTools.split(" ")
+    }
+
+    // Effort level
+    if (this.effort) {
+      opts.effort = this.effort
+    }
+
+    // Session: resume existing or set system prompt for new
+    if (this.sessionId) {
+      opts.resume = this.sessionId
+    } else {
+      const effectivePrompt = this.overrideSystemPrompt !== null ? this.overrideSystemPrompt : this.config.systemPrompt
+      if (effectivePrompt) {
+        opts.systemPrompt = effectivePrompt
+      }
+    }
+
+    // MCP servers (inline — no config file needed)
+    opts.mcpServers = buildMcpServers(dirname(this.config.dbPath))
+
+    return opts
+  }
+
+  // ---------------------------------------------------------------------------
+  // Retry logic (unchanged)
+  // ---------------------------------------------------------------------------
 
   private async callWithRetry(fn: () => Promise<AgentCallResult>): Promise<AgentCallResult> {
     let lastError: Error | null = null
@@ -161,405 +220,242 @@ export class Agent {
     throw lastError ?? new Error("Unknown error during agent call")
   }
 
-  /** Spawn claude CLI for a plain text prompt (direct or Docker). */
-  private async spawnText(prompt: string): Promise<AgentCallResult> {
-    logger.info("Agent spawning CLI", {
-      mode: this.config.useDocker ? "docker" : "direct",
+  // ---------------------------------------------------------------------------
+  // Core query execution (text)
+  // ---------------------------------------------------------------------------
+
+  private async executeQuery(prompt: string): Promise<AgentCallResult> {
+    logger.info("Agent query", {
       hasSession: !!this.sessionId,
       sessionId: this.sessionId?.slice(0, 16) ?? null,
       promptPreview: prompt.slice(0, 120),
       promptLength: prompt.length,
     })
 
-    if (this.config.useDocker) {
-      return this.spawnViaDocker({ prompt, vision: null })
-    }
-
-    const proc = Bun.spawn(this.buildArgs(prompt, "stream-json"), {
-      cwd: this.sandboxDir,
-      env: buildSpawnEnv(this.config.token),
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    return this.raceWithTimeout(proc)
-  }
-
-  /** Spawn claude CLI with stream-json output, emitting text events incrementally. */
-  private async spawnTextStream(prompt: string, onEvent: (event: StreamEvent) => void): Promise<AgentCallResult> {
-    logger.debug("Spawning claude (streaming)", { hasSession: !!this.sessionId, promptLength: prompt.length })
-
-    if (this.config.useDocker) {
-      // Docker doesn't support streaming — fall back to non-streaming
-      return this.spawnViaDocker({ prompt, vision: null })
-    }
-
-    const args = this.buildArgs(prompt, "stream-json")
-    const proc = Bun.spawn(args, {
-      cwd: this.sandboxDir,
-      env: buildSpawnEnv(this.config.token),
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    this.activeProc = proc
-
     const startTime = performance.now()
+    this.abortController = new AbortController()
+    const opts = { ...this.buildSdkOptions(), abortController: this.abortController }
 
-    // Use configured timeout, or hard safety timeout to prevent infinite hangs
     const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
-    let timedOut = false
-    const timeoutHandle = setTimeout(() => {
-      timedOut = true
-      proc.kill()
-    }, effectiveTimeout)
+    const timeoutHandle = setTimeout(() => this.abortController?.abort(), effectiveTimeout)
 
-    // Read stderr concurrently (non-blocking)
-    const stderrPromise = new Response(proc.stderr as ReadableStream<Uint8Array>).text()
-
-    // Read stdout line-by-line for streaming events
-    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader()
-    const decoder = new TextDecoder()
-    let buffer = ""
-    let accumulated = ""
-    let finalResult: AgentCallResult | null = null
+    let resultText = ""
+    let sessionId: string | null = this.sessionId
+    let tokenUsage: TokenUsage | null = null
 
     try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop() ?? "" // keep incomplete line in buffer
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed) continue
-
-          let obj: Record<string, unknown>
-          try {
-            obj = JSON.parse(trimmed)
-          } catch {
-            continue
-          }
-
-          if (obj.type === "assistant" && typeof obj.message === "object" && obj.message !== null) {
-            const msg = obj.message as Record<string, unknown>
-            if (Array.isArray(msg.content)) {
-              for (const block of msg.content) {
-                if (typeof block === "object" && block !== null) {
-                  const b = block as Record<string, unknown>
-                  // Extract text content from assistant message events
-                  if (b.type === "text") {
-                    const text = b.text as string
-                    if (text && text.length > accumulated.length) {
-                      const delta = text.slice(accumulated.length)
-                      accumulated = text
-                      onEvent({ type: "text", text: delta })
-                    }
-                  }
-                  // Log MCP tool calls
-                  if (b.type === "tool_use") {
-                    logger.info("MCP tool called", {
-                      tool: b.name,
-                      toolId: (b.id as string)?.slice(0, 16),
-                      input: JSON.stringify(b.input ?? {}).slice(0, 200),
-                    })
-                  }
-                }
-              }
-            }
-          } else if (obj.type === "result") {
-            const parsed = obj as unknown as ClaudeResponse & { type: string }
-            if (parsed.session_id) this.setSessionId(parsed.session_id)
-
-            const tokenUsage: TokenUsage | null = parsed.usage
-              ? { inputTokens: parsed.usage.input_tokens ?? 0, outputTokens: parsed.usage.output_tokens ?? 0 }
-              : null
-
-            const text = parsed.result ?? accumulated
-            const durationMs = Math.round(performance.now() - startTime)
-            finalResult = { text, sessionId: this.sessionId, tokenUsage, durationMs }
-          }
-        }
+      for await (const msg of query({ prompt, options: opts as SdkOptions })) {
+        ;({ resultText, sessionId, tokenUsage } = this.processMessage(msg, resultText, sessionId, tokenUsage))
       }
+    } catch (err) {
+      if (this.abortController?.signal.aborted) throw new TimeoutError(effectiveTimeout)
+      throw err
     } finally {
       clearTimeout(timeoutHandle)
-      this.activeProc = null
+      this.abortController = null
     }
 
-    if (timedOut) throw new TimeoutError(effectiveTimeout)
+    if (sessionId && sessionId !== this.sessionId) this.setSessionId(sessionId)
 
-    const stderrText = await stderrPromise
-    const exitCode = await proc.exited
     const durationMs = Math.round(performance.now() - startTime)
-
-    if (exitCode !== 0) {
-      const errorMsg = stderrText.trim() || `claude exited with code ${exitCode}`
-      logger.error("Claude process failed", { exitCode, error: errorMsg })
-      throw new Error(errorMsg)
-    }
-
-    if (finalResult) {
-      onEvent({ type: "done", result: finalResult })
-      return finalResult
-    }
-
-    // Fallback: no result event found
-    logger.warn("stream: no result event, returning accumulated text")
-    const fallback: AgentCallResult = {
-      text: accumulated || "",
-      sessionId: this.sessionId,
-      tokenUsage: null,
-      durationMs,
-    }
-    onEvent({ type: "done", result: fallback })
-    return fallback
-  }
-
-  /** Spawn claude CLI with vision input (direct or Docker). */
-  private async spawnWithImage(imagePath: string, mediaType: string, prompt: string): Promise<AgentCallResult> {
-    const imageData = Buffer.from(await Bun.file(imagePath).arrayBuffer()).toString("base64")
-    return this.spawnWithRawImage(mediaType, imageData, prompt)
-  }
-
-  /** Core vision spawn — accepts pre-computed base64 data. */
-  private async spawnWithRawImage(mediaType: string, imageData: string, prompt: string): Promise<AgentCallResult> {
-    logger.debug("Spawning claude (vision)", {
-      mode: this.config.useDocker ? "docker" : "direct",
-      hasSession: !!this.sessionId,
-      mediaType,
-    })
-
-    if (this.config.useDocker) {
-      return this.spawnViaDocker({ prompt, vision: { mediaType, data: imageData } })
-    }
-
-    const args = this.buildArgs(null, "stream-json")
-    args.push("--input-format", "stream-json")
-
-    const proc = Bun.spawn(args, {
-      cwd: this.sandboxDir,
-      env: buildSpawnEnv(this.config.token),
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-
-    const message = {
-      type: "user",
-      message: {
-        role: "user",
-        content: [
-          { type: "image", source: { type: "base64", media_type: mediaType, data: imageData } },
-          { type: "text", text: prompt || "What do you see in this image?" },
-        ],
-      },
-    }
-    proc.stdin.write(JSON.stringify(message) + "\n")
-    proc.stdin.end()
-
-    return this.raceWithTimeout(proc)
-  }
-
-  /**
-   * Spawn claude inside an isolated Docker container.
-   * Token is passed via stdin as JSON — never appears in process args or env.
-   */
-  private async spawnViaDocker(payload: {
-    prompt: string
-    vision: { mediaType: string; data: string } | null
-  }): Promise<AgentCallResult> {
-    const dockerArgs = [
-      "docker",
-      "run",
-      "--rm",
-      "--interactive",
-      "--network=host",
-      "--memory=512m",
-      "--cpus=1",
-      this.config.dockerImage,
-    ]
-
-    const proc = Bun.spawn(dockerArgs, {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-
-    const stdinPayload = JSON.stringify({
-      token: this.config.token,
-      prompt: payload.prompt,
-      sessionId: this.sessionId,
-      vision: payload.vision,
-    })
-    proc.stdin.write(stdinPayload)
-    proc.stdin.end()
-
-    return this.raceWithTimeout(proc)
-  }
-
-  /**
-   * Race a spawned process against the configured timeout.
-   * Reads stdout and stderr CONCURRENTLY to prevent pipe deadlock.
-   */
-  private async raceWithTimeout(proc: ReturnType<typeof Bun.spawn>): Promise<AgentCallResult> {
-    this.activeProc = proc
-    const startTime = performance.now()
-
-    const readText = (s: unknown): Promise<string> => new Response(s as ReadableStream<Uint8Array>).text()
-    const readPromise = Promise.all([readText(proc.stdout), readText(proc.stderr)])
-
-    // Use configured timeout, or hard safety timeout to prevent infinite hangs
-    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
-
-    let timedOut = false
-    const timeoutHandle = setTimeout(() => {
-      timedOut = true
-      proc.kill()
-    }, effectiveTimeout)
-
-    let rawStdout: string
-    let stderrText: string
-    try {
-      ;[rawStdout, stderrText] = await readPromise
-    } finally {
-      clearTimeout(timeoutHandle)
-      this.activeProc = null
-    }
-
-    if (timedOut) throw new TimeoutError(effectiveTimeout)
-
-    const exitCode = await proc.exited
-    const durationMs = Math.round(performance.now() - startTime)
-
-    if (exitCode !== 0) {
-      const errorMsg = stderrText.trim() || `claude exited with code ${exitCode}`
-      logger.error("Claude process failed", { exitCode, error: errorMsg, durationMs })
-      throw new Error(errorMsg)
-    }
-
-    const result = { ...this.parseResponse(rawStdout), durationMs }
     logger.info("Agent call completed", {
       sessionId: this.sessionId?.slice(0, 16) ?? null,
       durationMs,
-      resultLength: result.text.length,
-      tokens: result.tokenUsage ? `${result.tokenUsage.inputTokens}in/${result.tokenUsage.outputTokens}out` : null,
+      resultLength: resultText.length,
+      tokens: tokenUsage ? `${tokenUsage.inputTokens}in/${tokenUsage.outputTokens}out` : null,
     })
-    return result
+
+    return { text: resultText, sessionId: this.sessionId, tokenUsage, durationMs }
   }
 
-  buildArgs(inlinePrompt: string | null, outputFormat: "json" | "stream-json" = "json"): string[] {
-    const args = ["claude", "--print", "--output-format", outputFormat]
-    if (outputFormat === "stream-json") args.push("--verbose")
-    if (this.config.mcpConfigPath) args.push("--mcp-config", this.config.mcpConfigPath)
-    if (this.config.skipPermissions) args.push("--dangerously-skip-permissions")
-    if (this.disableTools) args.push("--tools", "")
-    else if (this.allowedTools) args.push("--allowed-tools", this.allowedTools)
-    if (this.workerMode) args.push("--disable-slash-commands")
-    if (this.effort) args.push("--effort", this.effort)
-    // Use agent-local override if set, otherwise fall back to shared config
-    const effectivePrompt = this.overrideSystemPrompt !== null ? this.overrideSystemPrompt : this.config.systemPrompt
-    if (this.sessionId) {
-      args.push("--resume", this.sessionId)
-    } else if (effectivePrompt) {
-      args.push("--system-prompt", effectivePrompt)
+  // ---------------------------------------------------------------------------
+  // Query execution with streaming
+  // ---------------------------------------------------------------------------
+
+  private async executeQueryStream(prompt: string, onEvent: (event: StreamEvent) => void): Promise<AgentCallResult> {
+    logger.debug("Agent query (streaming)", { hasSession: !!this.sessionId, promptLength: prompt.length })
+
+    const startTime = performance.now()
+    this.abortController = new AbortController()
+    const opts = {
+      ...this.buildSdkOptions(),
+      abortController: this.abortController,
+      includePartialMessages: true,
     }
-    logger.info("CLI args built", {
-      args: args.filter((a) => !a.startsWith("--system-prompt")).join(" "),
-      mcpConfig: this.config.mcpConfigPath ?? "none",
-      hasSession: !!this.sessionId,
-      disableTools: this.disableTools,
-    })
-    if (inlinePrompt !== null) args.push("-p", inlinePrompt)
-    return args
-  }
 
-  parseResponse(rawStdout: string): Omit<AgentCallResult, "durationMs"> {
-    const trimmed = rawStdout.trim()
-    const lines = trimmed.split("\n").filter((l) => l.trim())
+    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
+    const timeoutHandle = setTimeout(() => this.abortController?.abort(), effectiveTimeout)
 
-    // stream-json: multiple newline-delimited JSON events — find the "result" event
-    if (lines.length > 1) {
-      let resultObj: (ClaudeResponse & { type: string }) | null = null
+    let resultText = ""
+    let accumulated = ""
+    let sessionId: string | null = this.sessionId
+    let tokenUsage: TokenUsage | null = null
 
-      for (const line of lines) {
-        let obj: Record<string, unknown>
-        try {
-          obj = JSON.parse(line)
-        } catch {
-          logger.debug("Skipping non-JSON line in stream output", { line: line.slice(0, 100) })
-          continue
-        }
-
-        // Log MCP tool calls from assistant events
-        if (obj.type === "assistant" && typeof obj.message === "object" && obj.message !== null) {
-          const msg = obj.message as Record<string, unknown>
-          if (Array.isArray(msg.content)) {
-            for (const block of msg.content) {
-              if (
-                typeof block === "object" &&
-                block !== null &&
-                (block as Record<string, unknown>).type === "tool_use"
-              ) {
-                const b = block as Record<string, unknown>
-                logger.info("MCP tool called", {
-                  tool: b.name,
-                  toolId: (b.id as string)?.slice(0, 16),
-                  input: JSON.stringify(b.input ?? {}).slice(0, 200),
-                })
-              }
-            }
+    try {
+      for await (const msg of query({ prompt, options: opts as SdkOptions })) {
+        // Handle streaming partial events for text deltas
+        if (msg.type === "stream_event") {
+          const event = (msg as { event: Record<string, unknown> }).event
+          if (
+            event?.type === "content_block_delta" &&
+            typeof event.delta === "object" &&
+            event.delta !== null &&
+            (event.delta as Record<string, unknown>).type === "text_delta"
+          ) {
+            const delta = (event.delta as Record<string, unknown>).text as string
+            accumulated += delta
+            onEvent({ type: "text", text: delta })
           }
         }
 
-        // Log MCP tool results
-        if (obj.type === "tool_result" || (obj.type === "assistant" && typeof obj.tool_use_id === "string")) {
-          // tool_result events confirm tool execution completed
-        }
-
-        if (obj.type === "result") {
-          resultObj = obj as unknown as ClaudeResponse & { type: string }
-        }
+        // Process standard messages (assistant, system, result)
+        ;({ resultText, sessionId, tokenUsage } = this.processMessage(msg, resultText, sessionId, tokenUsage))
       }
-
-      if (resultObj) {
-        if (resultObj.session_id) this.setSessionId(resultObj.session_id)
-        const tokenUsage: TokenUsage | null = resultObj.usage
-          ? { inputTokens: resultObj.usage.input_tokens ?? 0, outputTokens: resultObj.usage.output_tokens ?? 0 }
-          : null
-        const text = resultObj.result ?? trimmed
-        logger.debug("Claude response received (stream-json)", {
-          resultLength: text.length,
-          hasTokenUsage: !!tokenUsage,
-        })
-        return { text, sessionId: this.sessionId, tokenUsage }
-      }
-
-      logger.warn("stream-json: no result event found, returning raw stdout")
-      return { text: trimmed, sessionId: this.sessionId, tokenUsage: null }
+    } catch (err) {
+      if (this.abortController?.signal.aborted) throw new TimeoutError(effectiveTimeout)
+      throw err
+    } finally {
+      clearTimeout(timeoutHandle)
+      this.abortController = null
     }
 
-    // Standard json: single JSON object
-    let parsed: ClaudeResponse
-    try {
-      parsed = JSON.parse(trimmed)
-    } catch {
-      logger.warn("Failed to parse Claude JSON response, returning raw text")
-      return { text: trimmed, sessionId: this.sessionId, tokenUsage: null }
+    if (sessionId && sessionId !== this.sessionId) this.setSessionId(sessionId)
+
+    const durationMs = Math.round(performance.now() - startTime)
+    const result: AgentCallResult = {
+      text: resultText || accumulated,
+      sessionId: this.sessionId,
+      tokenUsage,
+      durationMs,
     }
 
-    if (parsed.session_id) this.setSessionId(parsed.session_id)
+    onEvent({ type: "done", result })
+    return result
+  }
 
+  // ---------------------------------------------------------------------------
+  // Query execution with image (vision)
+  // ---------------------------------------------------------------------------
+
+  private async executeQueryWithImage(mediaType: string, base64Data: string, prompt: string): Promise<AgentCallResult> {
+    logger.debug("Agent query (vision)", { hasSession: !!this.sessionId, mediaType })
+
+    const startTime = performance.now()
+    this.abortController = new AbortController()
+    const opts = { ...this.buildSdkOptions(), abortController: this.abortController }
+
+    const effectiveTimeout = this.config.timeoutMs > 0 ? this.config.timeoutMs : HARD_TIMEOUT_MS
+    const timeoutHandle = setTimeout(() => this.abortController?.abort(), effectiveTimeout)
+
+    // Build async generator that yields a single user message with image content
+    async function* imagePrompt(): AsyncGenerator<SDKUserMessage> {
+      yield {
+        type: "user",
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+                data: base64Data,
+              },
+            },
+            { type: "text", text: prompt || "What do you see in this image?" },
+          ],
+        },
+        parent_tool_use_id: null,
+        session_id: "",
+      } as SDKUserMessage
+    }
+
+    let resultText = ""
+    let sessionId: string | null = this.sessionId
     let tokenUsage: TokenUsage | null = null
-    if (parsed.usage) {
-      tokenUsage = {
-        inputTokens: parsed.usage.input_tokens ?? 0,
-        outputTokens: parsed.usage.output_tokens ?? 0,
+
+    try {
+      for await (const msg of query({ prompt: imagePrompt(), options: opts as SdkOptions })) {
+        ;({ resultText, sessionId, tokenUsage } = this.processMessage(msg, resultText, sessionId, tokenUsage))
+      }
+    } catch (err) {
+      if (this.abortController?.signal.aborted) throw new TimeoutError(effectiveTimeout)
+      throw err
+    } finally {
+      clearTimeout(timeoutHandle)
+      this.abortController = null
+    }
+
+    if (sessionId && sessionId !== this.sessionId) this.setSessionId(sessionId)
+
+    const durationMs = Math.round(performance.now() - startTime)
+    logger.info("Agent call completed", {
+      sessionId: this.sessionId?.slice(0, 16) ?? null,
+      durationMs,
+      resultLength: resultText.length,
+      tokens: tokenUsage ? `${tokenUsage.inputTokens}in/${tokenUsage.outputTokens}out` : null,
+    })
+
+    return { text: resultText, sessionId: this.sessionId, tokenUsage, durationMs }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Shared message processor
+  // ---------------------------------------------------------------------------
+
+  /** Process a single SDK message — extracts session ID, result text, token usage, logs tool calls. */
+  private processMessage(
+    msg: SDKMessage,
+    resultText: string,
+    sessionId: string | null,
+    tokenUsage: TokenUsage | null
+  ): { resultText: string; sessionId: string | null; tokenUsage: TokenUsage | null } {
+    // System init: capture session ID
+    if (msg.type === "system" && (msg as SDKSystemMessage).subtype === "init") {
+      sessionId = (msg as SDKSystemMessage).session_id
+    }
+
+    // Assistant messages: log MCP tool calls
+    if (msg.type === "assistant") {
+      const assistantMsg = msg as SDKAssistantMessage
+      if (assistantMsg.message?.content) {
+        for (const block of assistantMsg.message.content) {
+          if (typeof block === "object" && "type" in block && block.type === "tool_use") {
+            const b = block as { type: string; id?: string; name?: string; input?: unknown }
+            logger.info("MCP tool called", {
+              tool: b.name,
+              toolId: b.id?.slice(0, 16),
+              input: JSON.stringify(b.input ?? {}).slice(0, 200),
+            })
+          }
+        }
+      }
+
+      // Check for SDK-level errors on the assistant message
+      if (assistantMsg.error) {
+        logger.warn("Assistant message error", { error: assistantMsg.error })
       }
     }
 
-    const text = parsed.result ?? trimmed
-    logger.debug("Claude response received", { resultLength: text.length, hasTokenUsage: !!tokenUsage })
-    return { text, sessionId: this.sessionId, tokenUsage }
+    // Result: extract final text, usage, session ID
+    if (msg.type === "result") {
+      const resultMsg = msg as SDKResultMessage
+      sessionId = resultMsg.session_id
+
+      if (resultMsg.subtype === "success") {
+        const success = resultMsg as SDKResultSuccess
+        resultText = success.result
+        tokenUsage = {
+          inputTokens: success.usage.input_tokens ?? 0,
+          outputTokens: success.usage.output_tokens ?? 0,
+        }
+      } else {
+        const errorResult = resultMsg as SDKResultError
+        const errorMsg = errorResult.errors?.join("; ") || `Query failed: ${errorResult.subtype}`
+        throw new Error(errorMsg)
+      }
+    }
+
+    return { resultText, sessionId, tokenUsage }
   }
 }
