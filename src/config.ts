@@ -49,7 +49,6 @@ export function loadConfig(): AgentConfig {
     dbPath: Bun.env.CLAUDE_AGENT_DB_PATH ?? DEFAULT_DB_PATH,
     skipPermissions: (Bun.env.CLAUDE_AGENT_SKIP_PERMISSIONS ?? "1") === "1",
     systemPrompt: Bun.env.CLAUDE_AGENT_SYSTEM_PROMPT || undefined,
-    mcpConfigPath: Bun.env.CLAUDE_AGENT_MCP_CONFIG_PATH || undefined,
     whisperModelPath: Bun.env.WHISPER_MODEL_PATH || undefined,
     whisperLanguage: Bun.env.WHISPER_LANGUAGE || "auto",
     whisperThreads: getOptionalEnvInt("WHISPER_THREADS", 4, 1, 16),

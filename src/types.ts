@@ -50,8 +50,6 @@ export interface AgentConfig {
   skipPermissions: boolean
   /** Optional system prompt that defines the agent's persona and capabilities */
   systemPrompt?: string
-  /** Path to MCP configuration file (auto-generated if not set) */
-  mcpConfigPath?: string
   /** Path to whisper.cpp GGML model file — enables voice transcription if set */
   whisperModelPath?: string
   /** Whisper language code (ISO 639-1, default: "auto") */

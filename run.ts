@@ -26,7 +26,7 @@ import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
 import { buildMemoryContext } from "./src/memory"
 import { HealthMonitor } from "./src/health"
 import { generateTeamIdentities } from "./src/agent-identity"
-import { ensureMcpConfig, getMcpServerNames } from "./src/mcp-config"
+import { getMcpServerNames } from "./src/mcp-config"
 import { Scheduler, type ScheduledJobData } from "./src/scheduler"
 import { formatForTelegram } from "./src/formatter"
 
@@ -43,11 +43,8 @@ if (!botToken) {
 const agentConfig = loadConfig()
 logger.setMinLevel((Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO") as LogLevel)
 
-// MCP config: generate config file so agents can use bunqueue MCP tools
-const dbDir = dirname(agentConfig.dbPath)
-const mcpConfigPath = ensureMcpConfig(agentConfig.mcpConfigPath, dbDir)
-agentConfig.mcpConfigPath = mcpConfigPath
 // Set DATA_PATH so the embedded Worker shares the same SQLite DB as the MCP server
+const dbDir = dirname(agentConfig.dbPath)
 process.env.DATA_PATH = `${dbDir}/bunqueue.db`
 
 const db = new Database(agentConfig.dbPath)
