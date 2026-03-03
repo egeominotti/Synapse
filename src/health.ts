@@ -8,15 +8,8 @@
 import { logger } from "./logger"
 import { checkBinaryAvailable } from "./whisper"
 import type { Database } from "./db"
-import type { AgentPool } from "./agent-pool"
 
 const MEMORY_THRESHOLD_MB = 512
-
-export interface AgentPoolStatus {
-  chatId: number
-  master: { name: string; busy: boolean }
-  workers: Array<{ name: string; busy: boolean }>
-}
 
 export interface HealthStatus {
   db: boolean
@@ -24,7 +17,7 @@ export interface HealthStatus {
   whisper: boolean | null // null = not configured
   memoryMb: number
   uptimeMs: number
-  pools: AgentPoolStatus[]
+  activeAgents: number
 }
 
 export interface HealthMonitorDeps {
@@ -32,7 +25,7 @@ export interface HealthMonitorDeps {
   groqApiKey?: string
   whisperModelPath?: string
   botStartedAt: number
-  agentPools: Map<number, AgentPool>
+  agents: Map<number, unknown>
 }
 
 export class HealthMonitor {
@@ -47,19 +40,13 @@ export class HealthMonitor {
 
   /** Run all health checks and return current status. */
   async check(): Promise<HealthStatus> {
-    const pools: AgentPoolStatus[] = []
-    for (const [chatId, pool] of this.deps.agentPools) {
-      const s = pool.getStatus()
-      pools.push({ chatId, ...s })
-    }
-
     const status: HealthStatus = {
       db: await this.checkDb(),
       groq: this.deps.groqApiKey ? await this.checkGroq() : null,
       whisper: this.deps.whisperModelPath ? await this.checkWhisper() : null,
       memoryMb: Math.round(process.memoryUsage.rss() / 1024 / 1024),
       uptimeMs: Date.now() - this.deps.botStartedAt,
-      pools,
+      activeAgents: this.deps.agents.size,
     }
 
     this.detectChanges(status)
@@ -166,20 +153,13 @@ export class HealthMonitor {
   }
 
   private logStatus(status: HealthStatus): void {
-    const agentsSummary = status.pools.map((p) => {
-      const masterStatus = p.master.busy ? "BUSY" : "IDLE"
-      const busyWorkers = p.workers.filter((w) => w.busy).length
-      return `chat:${p.chatId} master:${masterStatus} workers:${busyWorkers}/${p.workers.length}`
-    })
-
     logger.debug("Health check", {
       db: status.db,
       groq: status.groq,
       whisper: status.whisper,
       memoryMb: status.memoryMb,
       uptimeMs: status.uptimeMs,
-      activePools: status.pools.length,
-      agents: agentsSummary.length > 0 ? agentsSummary : "none",
+      activeAgents: status.activeAgents,
     })
   }
 

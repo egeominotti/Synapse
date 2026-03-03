@@ -12,9 +12,6 @@ const baseConfig: AgentConfig = {
   dbPath: ":memory:",
   skipPermissions: true,
   systemPrompt: undefined,
-  maxConcurrentPerChat: 1,
-  collaboration: true,
-  maxTeamAgents: 20,
 }
 
 // ---------------------------------------------------------------------------
@@ -254,38 +251,6 @@ describe("Agent.buildSdkOptions", () => {
     const opts = agent.buildSdkOptions()
     expect(opts.allowedTools).toEqual(["Bash", "Read", "Write"])
     expect(opts.effort).toBe("low")
-    agent.cleanup()
-  })
-
-  it("includes hooks when set", () => {
-    const agent = new Agent(baseConfig)
-    agent.hooks = { PreToolUse: [{ hooks: [async () => ({ continue: true })] }] }
-    const opts = agent.buildSdkOptions()
-    expect(opts.hooks).toBeDefined()
-    expect(opts.hooks!.PreToolUse).toHaveLength(1)
-    agent.cleanup()
-  })
-
-  it("does not include hooks when null", () => {
-    const agent = new Agent(baseConfig)
-    const opts = agent.buildSdkOptions()
-    expect(opts.hooks).toBeUndefined()
-    agent.cleanup()
-  })
-
-  it("includes agents when set", () => {
-    const agent = new Agent(baseConfig)
-    agent.agents = { researcher: { description: "test", prompt: "test" } }
-    const opts = agent.buildSdkOptions()
-    expect(opts.agents).toBeDefined()
-    expect(opts.agents!.researcher).toBeDefined()
-    agent.cleanup()
-  })
-
-  it("does not include agents when null", () => {
-    const agent = new Agent(baseConfig)
-    const opts = agent.buildSdkOptions()
-    expect(opts.agents).toBeUndefined()
     agent.cleanup()
   })
 })

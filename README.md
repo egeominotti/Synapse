@@ -15,7 +15,6 @@
   <img src="https://img.shields.io/badge/bot-Telegram-26a5e4?logo=telegram&logoColor=fff" alt="Telegram"/>
   <img src="https://img.shields.io/badge/AI-Claude-d4a574?logo=anthropic&logoColor=fff" alt="Claude"/>
   <a href="https://github.com/egeominotti/bunqueue"><img src="https://img.shields.io/badge/scheduler-bunqueue-ff6b35" alt="bunqueue"/></a>
-  <img src="https://img.shields.io/badge/tests-387_passed-brightgreen" alt="Tests"/>
 </p>
 
 ---
@@ -24,12 +23,8 @@
 
 - **Telegram bot** — multi-chat, voice messages, photos, documents, edited messages
 - **Persistent memory** — SQLite WAL, conversations resume across restarts
-- **Auto-team task queue** — bunqueue-backed subtask distribution for parallel agent execution
-- **SDK Hooks** — security enforcement (block .env/credentials), tool logging, Telegram progress, notification forwarding
-- **SDK Subagents** — master delegates to specialists via Task tool: researcher (haiku), code-writer (sonnet), reviewer (haiku)
 - **Scheduled jobs** — cron, interval, delay, one-shot via [bunqueue](https://github.com/egeominotti/bunqueue) MCP integration
 - **Sandbox isolation** — each agent runs in `/tmp/synapse-agent-*` with safety rules
-- **Auto-team** — master decomposes complex tasks, workers execute in parallel
 - **Voice-to-text** — Groq API (primary) + local whisper-cli fallback
 - **Health monitoring** — DB, Groq, whisper checks every 30s with Telegram alerts
 - **Runtime config** — all parameters configurable live via `/config` (admin only)
@@ -84,14 +79,13 @@ bun run run.ts
 
 ## Environment Variables
 
-| Variable                      | Required | Default                      | Description                 |
-| ----------------------------- | -------- | ---------------------------- | --------------------------- |
-| `CLAUDE_CODE_OAUTH_TOKEN`     | Yes      | —                            | OAuth token for Claude CLI  |
-| `TELEGRAM_BOT_TOKEN`          | Yes      | —                            | Telegram bot token          |
-| `TELEGRAM_ADMIN_ID`           | No       | —                            | Admin chat ID for `/config` |
-| `GROQ_API_KEY`                | No       | —                            | Groq API key for cloud STT  |
-| `CLAUDE_AGENT_MAX_CONCURRENT` | No       | `1`                          | Concurrent agents per chat  |
-| `CLAUDE_AGENT_DB_PATH`        | No       | `~/.claude-agent/synapse.db` | SQLite database path        |
+| Variable                  | Required | Default                      | Description                 |
+| ------------------------- | -------- | ---------------------------- | --------------------------- |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Yes      | —                            | OAuth token for Claude CLI  |
+| `TELEGRAM_BOT_TOKEN`      | Yes      | —                            | Telegram bot token          |
+| `TELEGRAM_ADMIN_ID`       | No       | —                            | Admin chat ID for `/config` |
+| `GROQ_API_KEY`            | No       | —                            | Groq API key for cloud STT  |
+| `CLAUDE_AGENT_DB_PATH`    | No       | `~/.claude-agent/synapse.db` | SQLite database path        |
 
 See [`.env.example`](.env.example) for the full list.
 
@@ -116,16 +110,11 @@ See [`.env.example`](.env.example) for the full list.
 Telegram
     │
     ▼
-ChatQueue ─── Semaphore (in-memory, per-chat ordering)
-    │
-    ▼
-AgentPool ─── Master (resume) + N-1 Workers (fresh memory)
-    │
 Agent ─── @anthropic-ai/claude-agent-sdk query() API
-    │                    │                    │
- ┌──┴──┐          TaskQueue (bunqueue)   Hooks + Subagents
- ▼     ▼          auto-team parallel     security, progress,
-History SessionStore ──► SQLite (WAL)    researcher/code-writer/reviewer
+    │
+ ┌──┴──┐
+ ▼     ▼
+History SessionStore ──► SQLite (WAL)
                           ▲
               ┌───────────┼───────────┐
               ▼           ▼           ▼
@@ -144,13 +133,13 @@ History SessionStore ──► SQLite (WAL)    researcher/code-writer/reviewer
 | Scheduler | [bunqueue](https://github.com/egeominotti/bunqueue) (MCP) |
 | Voice     | Groq API + whisper.cpp                                    |
 | Logging   | pino                                                      |
-| Testing   | bun:test (387 tests)                                      |
+| Testing   | bun:test                                                  |
 | CI/CD     | GitHub Actions + Husky                                    |
 
 ## Development
 
 ```bash
-bun test              # 387 tests
+bun test              # Run tests
 bun run typecheck     # TypeScript strict check
 bun run lint          # ESLint
 bun run format        # Prettier

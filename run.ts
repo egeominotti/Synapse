@@ -1,11 +1,11 @@
 /**
  * Claude Agent — Telegram Bot entry point.
  *
- * Every Telegram chat gets its own Claude session with infinite memory.
+ * Every Telegram chat gets its own Claude agent with infinite memory.
  * Sessions are persisted to SQLite and survive process restarts.
  *
  * Usage:
- *   TELEGRAM_BOT_TOKEN=<token> CLAUDE_CODE_OAUTH_TOKEN=<token> bun run telegram.ts
+ *   TELEGRAM_BOT_TOKEN=<token> CLAUDE_CODE_OAUTH_TOKEN=<token> bun run run.ts
  */
 
 import { Bot } from "grammy"
@@ -13,20 +13,15 @@ import { dirname } from "path"
 import { loadConfig } from "./src/config"
 import { Database } from "./src/db"
 import { Agent } from "./src/agent"
-import { AgentPool } from "./src/agent-pool"
 import { HistoryManager } from "./src/history"
 import { SessionStore } from "./src/session-store"
 import { RuntimeConfig } from "./src/runtime-config"
-import { ChatQueue } from "./src/chat-queue"
-import { TaskQueue } from "./src/task-queue"
 import { logger } from "./src/logger"
 import type { LogLevel } from "./src/types"
 import { registerCommands } from "./src/telegram/commands"
 import { registerHandlers, type TelegramDeps } from "./src/telegram/handlers"
 import { validateWhisperDeps, type WhisperConfig } from "./src/whisper"
-import { buildMemoryContext } from "./src/memory"
 import { HealthMonitor } from "./src/health"
-import { generateTeamIdentities } from "./src/agent-identity"
 import { getMcpServerNames } from "./src/mcp-config"
 import { Scheduler, type ScheduledJobData } from "./src/scheduler"
 import { formatForTelegram } from "./src/formatter"
@@ -57,15 +52,10 @@ function isAdmin(chatId: number): boolean {
   return adminId !== null && chatId === adminId
 }
 
-const team = generateTeamIdentities(agentConfig.maxConcurrentPerChat)
-const teamRoster = team.map((t) => `${t.emoji} ${t.name}`).join(", ")
-
 logger.info("Starting Telegram bot", {
   dbPath: agentConfig.dbPath,
   hasSystemPrompt: !!agentConfig.systemPrompt,
   adminId: adminId ?? "not set",
-  maxConcurrent: agentConfig.maxConcurrentPerChat,
-  team: teamRoster,
 })
 
 const bot = new Bot(botToken)
@@ -75,70 +65,47 @@ const bot = new Bot(botToken)
 // ---------------------------------------------------------------------------
 
 const MAX_AGENTS = 500
-const agentPools = new Map<number, AgentPool>()
+const agents = new Map<number, Agent>()
 const histories = new Map<number, HistoryManager>()
-// ChatQueue: in-memory per-chat ordering (fast, zero I/O overhead)
-const chatQueue = new ChatQueue(agentConfig.maxConcurrentPerChat)
-runtimeConfig.setOnMaxConcurrentChange((n) => chatQueue.setMaxConcurrency(n))
-// TaskQueue: bunqueue-backed subtask distribution for auto-team
-const taskQueue = new TaskQueue()
 const botStartedAt = Date.now()
 
-function getAgentPool(chatId: number): AgentPool {
-  if (agentPools.has(chatId)) {
-    const pool = agentPools.get(chatId)!
+function getAgent(chatId: number): Agent {
+  if (agents.has(chatId)) {
+    const agent = agents.get(chatId)!
     // LRU refresh
-    agentPools.delete(chatId)
-    agentPools.set(chatId, pool)
-    return pool
+    agents.delete(chatId)
+    agents.set(chatId, agent)
+    return agent
   }
 
-  // Create primary agent
+  // Create agent
   const savedSessionId = store.get(chatId)
-  let agent: Agent
-
   const chatAgentConfig = { ...agentConfig, chatId }
+  const agent = new Agent(chatAgentConfig)
 
   if (savedSessionId) {
-    agent = new Agent(chatAgentConfig)
     agent.setSessionId(savedSessionId)
     logger.info("Session restored from DB", { chatId, sessionId: savedSessionId.slice(0, 16) + "..." })
   } else {
-    // New session — inject conversation memory into system prompt
-    const recentMessages = db.getRecentMessagesByChatId(chatId, 30)
-    const memory = buildMemoryContext(recentMessages)
-    if (memory) {
-      const basePrompt = chatAgentConfig.systemPrompt ?? ""
-      agent = new Agent({ ...chatAgentConfig, systemPrompt: basePrompt + "\n\n" + memory })
-      logger.info("New agent with memory", { chatId, memoryMessages: recentMessages.length })
-    } else {
-      agent = new Agent(chatAgentConfig)
-      logger.info("New agent created", { chatId })
-    }
+    logger.info("New agent created", { chatId })
   }
 
   // LRU eviction
-  if (agentPools.size >= MAX_AGENTS) {
-    const oldestKey = agentPools.keys().next().value!
-    const evicted = agentPools.get(oldestKey)
+  if (agents.size >= MAX_AGENTS) {
+    const oldestKey = agents.keys().next().value!
+    const evicted = agents.get(oldestKey)
     evicted?.cleanup()
-    agentPools.delete(oldestKey)
+    agents.delete(oldestKey)
     histories.delete(oldestKey)
     store.delete(oldestKey)
-    logger.debug("Agent pool evicted (LRU)", {
+    logger.debug("Agent evicted (LRU)", {
       evictedChatId: oldestKey,
-      mapSize: agentPools.size,
+      mapSize: agents.size,
     })
   }
 
-  const pool = new AgentPool(chatId, agent, chatAgentConfig, db)
-  agentPools.set(chatId, pool)
-  return pool
-}
-
-/** Backward-compatible wrapper — returns the primary agent */
-function getAgent(chatId: number): Agent {
-  return getAgentPool(chatId).getPrimary()
+  agents.set(chatId, agent)
+  return agent
 }
 
 function getHistory(chatId: number, agent: Agent): HistoryManager {
@@ -196,7 +163,7 @@ const healthMonitor = new HealthMonitor(
     groqApiKey: agentConfig.groqApiKey,
     whisperModelPath: agentConfig.whisperModelPath,
     botStartedAt,
-    agentPools,
+    agents,
   },
   (msg) => {
     if (adminId) {
@@ -211,14 +178,9 @@ const healthMonitor = new HealthMonitor(
 
 const scheduler = new Scheduler(
   async (data: ScheduledJobData) => {
-    const pool = getAgentPool(data.chatId)
-    const { agent, isOverflow } = pool.acquire()
-    try {
-      const result = await agent.call(data.prompt)
-      return result.text
-    } finally {
-      pool.release(agent, isOverflow)
-    }
+    const agent = getAgent(data.chatId)
+    const result = await agent.call(data.prompt)
+    return result.text
   },
   async (chatId: number, text: string) => {
     const { html, plain } = formatForTelegram(text)
@@ -239,16 +201,13 @@ const deps: TelegramDeps = {
   agentConfig,
   db,
   store,
-  agentPools,
+  agents,
   histories,
   runtimeConfig,
-  chatQueue,
-  taskQueue,
   whisperConfig,
   botStartedAt,
   isAdmin,
   getAgent,
-  getAgentPool,
   getHistory,
   persistSession,
 }
@@ -267,16 +226,15 @@ bot.catch((err) => {
 const shutdown = async (signal: string): Promise<void> => {
   logger.info(`Received ${signal}, stopping bot...`)
   healthMonitor.stop()
-  await taskQueue.stop()
   await scheduler.stop()
   await bot.stop()
 
-  // Clean up all agent pool sandboxes (temp directories)
-  for (const [chatId, pool] of agentPools) {
-    pool.cleanup()
-    logger.debug("Agent pool cleaned up on shutdown", { chatId })
+  // Clean up all agent sandboxes (temp directories)
+  for (const [chatId, agent] of agents) {
+    agent.cleanup()
+    logger.debug("Agent cleaned up on shutdown", { chatId })
   }
-  agentPools.clear()
+  agents.clear()
 
   db.close()
   process.exit(0)
@@ -310,9 +268,6 @@ bot.start({
     // Start health monitoring (every 30 seconds)
     healthMonitor.start(30_000)
 
-    // Start task queue for auto-team subtask distribution (bunqueue Worker)
-    taskQueue.start()
-
     // Start scheduler (bunqueue embedded Worker)
     scheduler.start()
 
@@ -333,13 +288,9 @@ bot.start({
           `> session:  new\n` +
           `> db:       ${agentConfig.dbPath}\n` +
           `> memory:   ${globalStats ? `${globalStats.totalMessages} msg / ${globalStats.totalSessions} sessions` : "empty"}\n` +
-          `> team:     ${teamRoster}\n` +
-          `> workers:  ${agentConfig.maxConcurrentPerChat}x per chat\n` +
           `> health:   every 30s\n` +
           `> chats:    ${knownChatIds.length}\n` +
-          `> queue:    in-memory (chat) + bunqueue (tasks)\n` +
           `> mcp:      ${getMcpServerNames().join(", ")}\n` +
-          `> collab:   ${agentConfig.collaboration ? `enabled (max ${agentConfig.maxTeamAgents} agents)` : "disabled"}\n` +
           `> timeout:  ${agentConfig.timeoutMs > 0 ? `${agentConfig.timeoutMs / 1000}s` : "none"}\n` +
           `> retry:    ${agentConfig.maxRetries}x\n` +
           `> status:   ONLINE` +

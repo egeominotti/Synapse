@@ -17,9 +17,6 @@ import type {
   SDKAssistantMessage,
   SDKPartialAssistantMessage,
   SDKUserMessage,
-  HookEvent,
-  HookCallbackMatcher,
-  AgentDefinition,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { AgentConfig, AgentCallResult, TokenUsage, StreamEvent } from "./types"
 import { logger } from "./logger"
@@ -71,7 +68,7 @@ export class Agent {
 
   constructor(config: AgentConfig) {
     this.config = config
-    this.sandboxDir = createSandbox(config.collaboration, config.chatId)
+    this.sandboxDir = createSandbox(config.chatId)
     // Cache stable options once at construction — avoids rebuilding per query
     this.baseOpts = {
       model: "claude-sonnet-4-6",
@@ -134,12 +131,6 @@ export class Agent {
   /** Effort level: "low", "medium", "high". Null = SDK default. */
   effort: "low" | "medium" | "high" | null = "low"
 
-  /** SDK hooks — set before each call for context-aware behavior (security, logging, progress). */
-  hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> | null = null
-
-  /** SDK subagent definitions — set on master agents for sequential delegation via Task tool. */
-  agents: Record<string, AgentDefinition> | null = null
-
   /** Send a text prompt with retry + timeout. */
   async call(prompt: string): Promise<AgentCallResult> {
     return this.callWithRetry(() => this.executeQuery(prompt))
@@ -184,16 +175,6 @@ export class Agent {
     // Effort level (mutable)
     if (this.effort) {
       opts.effort = this.effort
-    }
-
-    // Hooks (mutable, per-call)
-    if (this.hooks) {
-      opts.hooks = this.hooks
-    }
-
-    // Subagents (mutable, set once on master)
-    if (this.agents) {
-      opts.agents = this.agents
     }
 
     // Session: resume existing or set system prompt for new

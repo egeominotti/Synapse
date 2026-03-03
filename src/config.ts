@@ -53,8 +53,5 @@ export function loadConfig(): AgentConfig {
     whisperLanguage: Bun.env.WHISPER_LANGUAGE || "auto",
     whisperThreads: getOptionalEnvInt("WHISPER_THREADS", 4, 1, 16),
     groqApiKey: Bun.env.GROQ_API_KEY || undefined,
-    maxConcurrentPerChat: getOptionalEnvInt("CLAUDE_AGENT_MAX_CONCURRENT", 1, 1, 10),
-    collaboration: (Bun.env.CLAUDE_AGENT_COLLABORATION ?? "1") !== "0",
-    maxTeamAgents: getOptionalEnvInt("CLAUDE_AGENT_MAX_TEAM_AGENTS", 20, 2, 50),
   }
 }

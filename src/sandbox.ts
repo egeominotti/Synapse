@@ -36,7 +36,7 @@ export function buildAgentEnv(token: string): Record<string, string> {
 }
 
 /** Generate the CLAUDE.md safety rules text for a sandbox directory */
-export function generateSandboxRules(sandboxDir: string, collaboration: boolean = true, chatId?: number): string {
+export function generateSandboxRules(sandboxDir: string, chatId?: number): string {
   return [
     "# CLAUDE.md",
     "",
@@ -153,56 +153,7 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
     "",
     "This is **mandatory** for every project — the user must always receive a downloadable package.",
     "",
-    ...(collaboration
-      ? [
-          "## 6. TEAM DECOMPOSITION — AUTONOMOUS DECISION",
-          "",
-          "You are the orchestrator of a team of parallel agents.",
-          "When a task is complex and would benefit from parallel execution, you may decompose it.",
-          "",
-          "**When to decompose:**",
-          "- Comparing multiple items (frameworks, languages, tools, products)",
-          "- Auditing or analyzing multiple things in parallel",
-          "- Research across several independent topics",
-          "- Creating multiple independent deliverables",
-          "",
-          "**When NOT to decompose:**",
-          "- Simple questions, greetings, single-topic discussions",
-          "- Tasks that depend on sequential steps",
-          "- Short or trivial requests",
-          "",
-          "**How to decompose:**",
-          "Respond ONLY with a JSON array of independent sub-tasks (minimum 2). No other text:",
-          "```",
-          '[{"task": "detailed description of sub-task 1"}, {"task": "detailed description of sub-task 2"}]',
-          "```",
-          "",
-          "Each sub-task will be executed by a separate agent in parallel.",
-          "",
-          "**Sub-task quality rules:**",
-          "- Each sub-task MUST be self-contained with enough context to produce a useful result independently",
-          "- Decompose to the right granularity: sub-tasks should be atomic and actionable, not vague",
-          '- BAD: `"Create the frontend"` — too vague, the worker won\'t know what to build',
-          '- GOOD: `"Create a login page with email/password form, validation, and error handling using React"` — specific and actionable',
-          "- Workers cannot decompose further, so your plan must be detailed enough in one shot",
-          "",
-          "**IMPORTANT: Only respond with a JSON array when you decide to decompose. Otherwise respond normally.**",
-          "",
-          "## 6b. SUBAGENTS (Task tool)",
-          "",
-          "You have specialized subagents available via the **Task** tool:",
-          "- **researcher** — research, analysis, information gathering (fast, read-only)",
-          "- **code-writer** — code implementation, bug fixes, file creation (full tools)",
-          "- **reviewer** — code review, quality assessment (read-only)",
-          "",
-          "Use subagents for focused **sequential** work within your conversation.",
-          "Use team decomposition (JSON array) for **parallel** independent tasks.",
-          "",
-          "Subagents run one at a time — for parallel execution, prefer team decomposition.",
-          "",
-        ]
-      : []),
-    `## ${collaboration ? "7" : "6"}. SCHEDULING & QUEUE MANAGEMENT (bunqueue MCP tools)`,
+    "## 6. SCHEDULING & QUEUE MANAGEMENT (bunqueue MCP tools)",
     "",
     "You have access to the full bunqueue MCP toolset for job scheduling, queue management,",
     "monitoring, and workflow orchestration. Use them when users ask to be reminded, schedule",
@@ -331,7 +282,7 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
     "",
     `**IMPORTANT:** Always set chatId to \`${chatId ?? 0}\` in the job data so results are sent to the correct chat.`,
     "",
-    `## ${collaboration ? "8" : "7"}. PERSISTENT MEMORY`,
+    "## 7. PERSISTENT MEMORY",
     "",
     "The file `.memory.md` in this sandbox is your persistent memory for this chat.",
     "It survives session resets and is shared across all agents in this chat.",
@@ -349,7 +300,7 @@ export function generateSandboxRules(sandboxDir: string, collaboration: boolean 
     "- Use markdown headers to organize sections",
     "- Remove outdated information when updating",
     "",
-    `## ${collaboration ? "9" : "8"}. WHEN IN DOUBT`,
+    "## 8. WHEN IN DOUBT",
     "",
     "If a user asks you to perform a potentially dangerous operation:",
     "1. REFUSE the operation",
@@ -377,17 +328,17 @@ export function readMemoryFile(sandboxDir: string): string | null {
   return content || null
 }
 
-/** Cached base rules (without sandboxDir substitution) — regenerated only when chatId/collab changes */
+/** Cached base rules — regenerated only when chatId changes */
 let _rulesCache: { key: string; rules: string } | null = null
 
 /** Create an isolated sandbox directory with safety rules. Returns the path. */
-export function createSandbox(collaboration: boolean = true, chatId?: number): string {
+export function createSandbox(chatId?: number): string {
   const sandboxDir = mkdtempSync(join(tmpdir(), "synapse-agent-"))
 
-  // Cache the CLAUDE.md content — only regenerate when chatId or collaboration changes
-  const cacheKey = `${collaboration}:${chatId ?? 0}`
+  // Cache the CLAUDE.md content — only regenerate when chatId changes
+  const cacheKey = `${chatId ?? 0}`
   if (!_rulesCache || _rulesCache.key !== cacheKey) {
-    _rulesCache = { key: cacheKey, rules: generateSandboxRules(sandboxDir, collaboration, chatId) }
+    _rulesCache = { key: cacheKey, rules: generateSandboxRules(sandboxDir, chatId) }
   }
 
   writeFileSync(join(sandboxDir, "CLAUDE.md"), _rulesCache.rules)

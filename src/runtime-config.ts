@@ -55,28 +55,6 @@ function buildDefinitions(defaults: AgentConfig): ConfigDefinition[] {
       defaultValue: "INFO",
       enum: ["DEBUG", "INFO", "WARN", "ERROR"],
     },
-    {
-      key: "max_concurrent",
-      type: "number",
-      description: "Max concurrent agents per chat (1 = serial)",
-      defaultValue: String(defaults.maxConcurrentPerChat),
-      min: 1,
-      max: 10,
-    },
-    {
-      key: "collaboration",
-      type: "boolean",
-      description: "Enable auto-team collaboration mode",
-      defaultValue: String(defaults.collaboration),
-    },
-    {
-      key: "max_team_agents",
-      type: "number",
-      description: "Max parallel agents per auto-team decomposition",
-      defaultValue: String(defaults.maxTeamAgents),
-      min: 2,
-      max: 50,
-    },
   ]
 }
 
@@ -84,8 +62,6 @@ export class RuntimeConfig {
   private readonly db: Database
   private readonly config: AgentConfig
   private readonly definitions: Map<RuntimeConfigKey, ConfigDefinition>
-  private onMaxConcurrentChange?: (n: number) => void
-
   constructor(db: Database, config: AgentConfig) {
     this.db = db
     this.config = config
@@ -94,11 +70,6 @@ export class RuntimeConfig {
     this.definitions = new Map(defs.map((d) => [d.key, d]))
 
     this.loadFromDb()
-  }
-
-  /** Register a callback for when max_concurrent changes (used to sync ChatQueue) */
-  setOnMaxConcurrentChange(cb: (n: number) => void): void {
-    this.onMaxConcurrentChange = cb
   }
 
   /** Load persisted overrides from DB and apply to in-memory config */
@@ -141,12 +112,6 @@ export class RuntimeConfig {
         return String(this.config.skipPermissions)
       case "log_level":
         return Bun.env.CLAUDE_AGENT_LOG_LEVEL ?? "INFO"
-      case "max_concurrent":
-        return String(this.config.maxConcurrentPerChat)
-      case "collaboration":
-        return String(this.config.collaboration)
-      case "max_team_agents":
-        return String(this.config.maxTeamAgents)
     }
   }
 
@@ -263,16 +228,6 @@ export class RuntimeConfig {
       case "log_level":
         logger.setMinLevel(value as LogLevel)
         Bun.env.CLAUDE_AGENT_LOG_LEVEL = value
-        break
-      case "max_concurrent":
-        this.config.maxConcurrentPerChat = Number(value)
-        this.onMaxConcurrentChange?.(Number(value))
-        break
-      case "collaboration":
-        this.config.collaboration = value === "true"
-        break
-      case "max_team_agents":
-        this.config.maxTeamAgents = Number(value)
         break
     }
   }

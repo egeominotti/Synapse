@@ -58,12 +58,6 @@ export interface AgentConfig {
   whisperThreads?: number
   /** Groq API key — enables cloud STT as primary with local fallback */
   groqApiKey?: string
-  /** Max concurrent agents per chat (1 = serial, >1 = overflow agents) */
-  maxConcurrentPerChat: number
-  /** Enable auto-team collaboration mode (default: true) */
-  collaboration: boolean
-  /** Max agents per auto-team decomposition (safety cap, default: 20) */
-  maxTeamAgents: number
   /** Telegram chat ID — passed to sandbox for scheduling context */
   chatId?: number
 }
@@ -78,41 +72,6 @@ export interface AgentCallResult {
 
 /** Streaming event emitted during agent.callStream() */
 export type StreamEvent = { type: "text"; text: string } | { type: "done"; result: AgentCallResult }
-
-// ---------------------------------------------------------------------------
-// Team collaboration (orchestrator + TaskQueue)
-// ---------------------------------------------------------------------------
-
-import type { AgentIdentity } from "./agent-identity"
-
-/** A sub-task decomposed by the master agent */
-export interface SubTask {
-  task: string
-}
-
-/** Result of a single worker's sub-task execution */
-export interface WorkerResult {
-  subtask: string
-  identity: AgentIdentity
-  result: AgentCallResult | null
-  error: string | null
-}
-
-/** Full result of a team collaboration */
-export interface TeamResult {
-  subtasks: SubTask[]
-  workerResults: WorkerResult[]
-  synthesis: AgentCallResult
-  totalDurationMs: number
-}
-
-/** Serializable subtask job for bunqueue TaskQueue */
-export interface SubTaskJob {
-  batchId: string
-  index: number
-  task: string
-  chatId: number
-}
 
 /** Slash command handler signature */
 export type SlashCommandHandler = (args: string) => Promise<boolean>
@@ -136,9 +95,6 @@ export type RuntimeConfigKey =
   | "retry_delay_ms"
   | "skip_permissions"
   | "log_level"
-  | "max_concurrent"
-  | "collaboration"
-  | "max_team_agents"
 
 /** Definition of a runtime-configurable parameter */
 export interface ConfigDefinition {
