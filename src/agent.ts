@@ -17,6 +17,9 @@ import type {
   SDKAssistantMessage,
   SDKPartialAssistantMessage,
   SDKUserMessage,
+  HookEvent,
+  HookCallbackMatcher,
+  AgentDefinition,
 } from "@anthropic-ai/claude-agent-sdk"
 import type { AgentConfig, AgentCallResult, TokenUsage, StreamEvent } from "./types"
 import { logger } from "./logger"
@@ -71,6 +74,7 @@ export class Agent {
     this.sandboxDir = createSandbox(config.collaboration, config.chatId)
     // Cache stable options once at construction — avoids rebuilding per query
     this.baseOpts = {
+      model: "claude-sonnet-4-6",
       cwd: this.sandboxDir,
       env: buildAgentEnv(config.token),
       mcpServers: buildMcpServers(dirname(config.dbPath)),
@@ -128,7 +132,13 @@ export class Agent {
   allowedTools: string | null = null
 
   /** Effort level: "low", "medium", "high". Null = SDK default. */
-  effort: "low" | "medium" | "high" | null = null
+  effort: "low" | "medium" | "high" | null = "low"
+
+  /** SDK hooks — set before each call for context-aware behavior (security, logging, progress). */
+  hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> | null = null
+
+  /** SDK subagent definitions — set on master agents for sequential delegation via Task tool. */
+  agents: Record<string, AgentDefinition> | null = null
 
   /** Send a text prompt with retry + timeout. */
   async call(prompt: string): Promise<AgentCallResult> {
@@ -174,6 +184,16 @@ export class Agent {
     // Effort level (mutable)
     if (this.effort) {
       opts.effort = this.effort
+    }
+
+    // Hooks (mutable, per-call)
+    if (this.hooks) {
+      opts.hooks = this.hooks
+    }
+
+    // Subagents (mutable, set once on master)
+    if (this.agents) {
+      opts.agents = this.agents
     }
 
     // Session: resume existing or set system prompt for new
@@ -371,7 +391,7 @@ export class Agent {
   // Shared message processor
   // ---------------------------------------------------------------------------
 
-  /** Process a single SDK message — extracts session ID, result text, token usage, logs tool calls. */
+  /** Process a single SDK message — extracts session ID, result text, token usage. Tool logging handled by hooks. */
   private processMessage(msg: SDKMessage, state: QueryState): void {
     // System init: capture session ID
     if (msg.type === "system") {
@@ -381,22 +401,9 @@ export class Agent {
       }
     }
 
-    // Assistant messages: log MCP tool calls
+    // Assistant messages: check for errors (tool logging moved to hooks)
     if (msg.type === "assistant") {
       const assistantMsg = msg as SDKAssistantMessage
-      if (assistantMsg.message?.content) {
-        for (const block of assistantMsg.message.content) {
-          if (typeof block === "object" && "type" in block && block.type === "tool_use") {
-            const b = block as { type: string; id?: string; name?: string; input?: unknown }
-            logger.info("MCP tool called", {
-              tool: b.name,
-              toolId: b.id?.slice(0, 16),
-              input: JSON.stringify(b.input ?? {}).slice(0, 200),
-            })
-          }
-        }
-      }
-
       if (assistantMsg.error) {
         logger.warn("Assistant message error", { error: assistantMsg.error })
       }

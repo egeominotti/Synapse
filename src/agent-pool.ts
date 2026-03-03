@@ -11,6 +11,7 @@ import type { AgentConfig } from "./types"
 import type { Database } from "./db"
 import { buildFullConversationContext } from "./memory"
 import { ORCHESTRATOR_IDENTITY, generateIdentity, type AgentIdentity } from "./agent-identity"
+import { buildSubagentDefinitions } from "./subagents"
 import { logger } from "./logger"
 
 export interface AcquireResult {
@@ -38,8 +39,11 @@ export class AgentPool {
     this.chatId = chatId
     this.config = config
     this.db = db
-    // Master agent: all tools enabled, high effort for quality decisions
+    // Master agent: all tools enabled, high effort, subagents for delegation
     primary.effort = "high"
+    if (config.collaboration) {
+      primary.agents = buildSubagentDefinitions()
+    }
     this.masterSlot = { agent: primary, identity: ORCHESTRATOR_IDENTITY, busy: false }
     this.maxWorkers = config.maxConcurrentPerChat - 1
 
@@ -159,6 +163,9 @@ export class AgentPool {
   setPrimary(agent: Agent): void {
     const old = this.masterSlot.agent
     agent.effort = "high"
+    if (this.config.collaboration) {
+      agent.agents = buildSubagentDefinitions()
+    }
     this.masterSlot.agent = agent
     this.masterSlot.busy = false
     old.cleanup()

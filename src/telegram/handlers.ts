@@ -22,6 +22,7 @@ import { formatForTelegram } from "../formatter"
 import { formatIdentityHeader, generateIdentity, type AgentIdentity } from "../agent-identity"
 import { detectTeamResponse, executeTeam, synthesize } from "../orchestrator"
 import { writeMemoryFile, readMemoryFile, MAX_MEMORY_FILE_CHARS } from "../sandbox"
+import { buildHooks, type HookContext } from "../hooks"
 import type { WhisperConfig } from "../whisper"
 import { transcribe } from "../whisper"
 import { logger } from "../logger"
@@ -304,6 +305,23 @@ async function executeWithRetry(
     writeMemoryFile(agent.sandboxDir, memoryBefore)
   }
 
+  // Wire SDK hooks for security, logging, progress, and notification forwarding
+  const hookCtx: HookContext = {
+    onToolComplete: (toolName, toolInput) => {
+      if (statusMsgId && (toolName === "Write" || toolName === "Edit")) {
+        const input = toolInput as Record<string, unknown>
+        const filePath = String(input.file_path ?? input.path ?? toolName)
+        const fileName = filePath.split("/").pop() ?? toolName
+        editStatus(api, chatId, statusMsgId, `${identity.emoji} <b>${identity.name}</b> ✏️ ${fileName}`).catch(() => {})
+      }
+    },
+    onNotification: (message, title) => {
+      const text = title ? `<b>${title}</b>\n${message}` : message
+      api.sendMessage(chatId, text, { parse_mode: "HTML" }).catch(() => {})
+    },
+  }
+  agent.hooks = buildHooks(hookCtx)
+
   const execute = async (execAgent: Agent): Promise<void> => {
     // Ensure memory is in this agent's sandbox (may differ from initial agent on retry)
     if (memoryBefore && execAgent !== agent) {
@@ -408,6 +426,7 @@ async function executeWithRetry(
     }
   } finally {
     stopTimer?.() // Safety net — ensure timer is always cleaned up
+    agent.hooks = null // Clear per-call hooks
     pool.release(agent, isOverflow)
     logger.info(`${identity.emoji} ${identity.name} released`, { chatId, agent: identity.name, role })
   }

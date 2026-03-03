@@ -202,10 +202,10 @@ describe("Agent.buildSdkOptions", () => {
     agent.cleanup()
   })
 
-  it("does not set effort by default", () => {
+  it("defaults effort to low", () => {
     const agent = new Agent(baseConfig)
     const opts = agent.buildSdkOptions()
-    expect(opts.effort).toBeUndefined()
+    expect(opts.effort).toBe("low")
     agent.cleanup()
   })
 
@@ -253,7 +253,39 @@ describe("Agent.buildSdkOptions", () => {
     agent.allowedTools = "Bash Read Write"
     const opts = agent.buildSdkOptions()
     expect(opts.allowedTools).toEqual(["Bash", "Read", "Write"])
-    expect(opts.effort).toBeUndefined()
+    expect(opts.effort).toBe("low")
+    agent.cleanup()
+  })
+
+  it("includes hooks when set", () => {
+    const agent = new Agent(baseConfig)
+    agent.hooks = { PreToolUse: [{ hooks: [async () => ({ continue: true })] }] }
+    const opts = agent.buildSdkOptions()
+    expect(opts.hooks).toBeDefined()
+    expect(opts.hooks!.PreToolUse).toHaveLength(1)
+    agent.cleanup()
+  })
+
+  it("does not include hooks when null", () => {
+    const agent = new Agent(baseConfig)
+    const opts = agent.buildSdkOptions()
+    expect(opts.hooks).toBeUndefined()
+    agent.cleanup()
+  })
+
+  it("includes agents when set", () => {
+    const agent = new Agent(baseConfig)
+    agent.agents = { researcher: { description: "test", prompt: "test" } }
+    const opts = agent.buildSdkOptions()
+    expect(opts.agents).toBeDefined()
+    expect(opts.agents!.researcher).toBeDefined()
+    agent.cleanup()
+  })
+
+  it("does not include agents when null", () => {
+    const agent = new Agent(baseConfig)
+    const opts = agent.buildSdkOptions()
+    expect(opts.agents).toBeUndefined()
     agent.cleanup()
   })
 })

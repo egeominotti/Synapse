@@ -390,7 +390,7 @@ describe("AgentPool agent configuration", () => {
     const worker = pool.acquire()
     expect(worker.agent.disableTools).toBe(false)
     expect(worker.agent.allowedTools).toBeNull()
-    expect(worker.agent.effort).toBeNull()
+    expect(worker.agent.effort).toBe("low")
 
     pool.release(worker.agent, worker.isOverflow)
     pool.release(master.agent, master.isOverflow)
@@ -427,6 +427,66 @@ describe("AgentPool agent configuration", () => {
     }
 
     pool.releaseMultiple(workers)
+    pool.cleanup()
+  })
+
+  it("master agent has subagent definitions when collaboration enabled", () => {
+    const db = createTestDb()
+    const config = createTestConfig({ collaboration: true })
+    const primary = new Agent(config)
+    const pool = new AgentPool(1, primary, config, db)
+
+    const { agent } = pool.acquire()
+    expect(agent.agents).toBeDefined()
+    expect(agent.agents!.researcher).toBeDefined()
+    expect(agent.agents!["code-writer"]).toBeDefined()
+    expect(agent.agents!.reviewer).toBeDefined()
+
+    pool.release(agent, false)
+    pool.cleanup()
+  })
+
+  it("master agent has no subagents when collaboration disabled", () => {
+    const db = createTestDb()
+    const config = createTestConfig({ collaboration: false })
+    const primary = new Agent(config)
+    const pool = new AgentPool(1, primary, config, db)
+
+    const { agent } = pool.acquire()
+    expect(agent.agents).toBeNull()
+
+    pool.release(agent, false)
+    pool.cleanup()
+  })
+
+  it("setPrimary sets subagents on new master", () => {
+    const db = createTestDb()
+    const config = createTestConfig({ collaboration: true })
+    const primary = new Agent(config)
+    const pool = new AgentPool(1, primary, config, db)
+
+    const newMaster = new Agent(config)
+    pool.setPrimary(newMaster)
+
+    const { agent } = pool.acquire()
+    expect(agent.agents).toBeDefined()
+    expect(agent.agents!.researcher).toBeDefined()
+
+    pool.release(agent, false)
+    pool.cleanup()
+  })
+
+  it("worker agents do not have subagents", () => {
+    const db = createTestDb()
+    const config = createTestConfig({ collaboration: true })
+    const primary = new Agent(config)
+    const pool = new AgentPool(1, primary, config, db)
+
+    pool.acquire() // master
+    const worker = pool.acquire() // worker
+    expect(worker.agent.agents).toBeNull()
+
+    pool.release(worker.agent, worker.isOverflow)
     pool.cleanup()
   })
 })

@@ -16,7 +16,9 @@ Synapse is a Claude AI agent platform with REPL and Telegram bot interfaces. Use
 - **Scheduler**: bunqueue (MCP-based job scheduling for all agents)
 - **Voice**: Groq API (primary) + whisper-cli local (fallback), whisper-large-v3-turbo
 - **Task Queue**: bunqueue (auto-team subtask distribution via Queue/Worker)
-- **Testing**: bun:test (346 tests, 23 files)
+- **SDK Hooks**: PreToolUse security, PostToolUse progress, Notification forwarding
+- **SDK Subagents**: researcher (haiku), code-writer (sonnet), reviewer (haiku) via Task tool
+- **Testing**: bun:test (387 tests, 25 files)
 - **Linting**: ESLint (typescript-eslint) + Prettier
 - **CI/CD**: GitHub Actions + Husky pre-commit hooks
 - **Claude Integration**: `@anthropic-ai/claude-agent-sdk` `query()` API (structured messages, inline MCP, AbortController)
@@ -43,6 +45,8 @@ Database (src/db.ts)                 SQLite — sessions, messages, attachments,
 RuntimeConfig  ChatQueue  Scheduler   Config + in-memory queue + bunqueue scheduler
 
 TaskQueue (src/task-queue.ts)        bunqueue-backed subtask distribution for auto-team
+Hooks (src/hooks.ts)                 SDK hooks: security, logging, progress, notifications
+Subagents (src/subagents.ts)         SDK subagent definitions: researcher, code-writer, reviewer
 Semaphore (src/semaphore.ts)         Counting semaphore for per-chat concurrency
 Whisper (src/whisper.ts)             Groq API (primary) + whisper-cli local (fallback)
 HealthMonitor (src/health.ts)        System stability checks every 30s with Telegram alerts
@@ -58,13 +62,15 @@ Orchestrator (src/orchestrator.ts)   Auto-team: detect decomposition, execute wo
 index.ts                → REPL entry point (125 lines)
 run.ts                  → Telegram bot entry point (352 lines)
 src/
-  agent.ts              → Claude SDK wrapper: query(), retry, timeout, vision, streaming (432 lines)
-  agent-pool.ts         → Per-chat agent pool: master + workers + overflow, lazy init (271 lines)
+  agent.ts              → Claude SDK wrapper: query(), retry, timeout, vision, streaming, hooks, subagents (430 lines)
+  agent-pool.ts         → Per-chat agent pool: master + workers + overflow, lazy init, subagents (278 lines)
   agent-identity.ts     → Identity generator: names, codes, geometric symbols (84 lines)
   orchestrator.ts       → Auto-team: detectTeamResponse, executeTeam (via TaskQueue), synthesize (172 lines)
+  hooks.ts              → SDK hook factories: security, logging, progress, notifications (155 lines)
+  subagents.ts          → SDK subagent definitions: researcher, code-writer, reviewer (44 lines)
   semaphore.ts          → Counting semaphore for concurrent task limiting (46 lines)
   health.ts             → Health monitor: DB, Groq, whisper, memory checks (204 lines)
-  sandbox.ts            → Sandbox creation, safety rules, agent env caching (489 lines)
+  sandbox.ts            → Sandbox creation, safety rules, agent env caching (500 lines)
   memory.ts             → Conversation memory context builder (89 lines)
   mcp-config.ts         → MCP server configuration (bunqueue for all agents) (78 lines)
   db-core.ts            → Database base class: schema, sessions, messages, attachments (448 lines)
@@ -88,7 +94,7 @@ src/
   telegram/
     handlers.ts         → Message handlers: text, photo, document, voice, audio, edited, auto-team (821 lines)
     commands.ts         → Bot commands: /start, /help, /reset, /stats, /config, etc. (503 lines)
-tests/                  → 346 tests across 23 files
+tests/                  → 387 tests across 25 files
 ```
 
 ## Commands
@@ -96,7 +102,7 @@ tests/                  → 346 tests across 23 files
 ```bash
 bun run index.ts          # Run REPL
 bun run run.ts            # Run Telegram bot
-bun test                  # Run tests (346 tests)
+bun test                  # Run tests (387 tests)
 bun run typecheck         # Type check (bunx tsc --noEmit)
 bun run lint              # ESLint
 bun run format            # Prettier write
@@ -110,8 +116,10 @@ bun install               # Install deps
 
 - **Claude Agent SDK**: Uses `@anthropic-ai/claude-agent-sdk` `query()` API — structured messages, no CLI parsing
 - **Session continuity**: SDK `resume` option resumes conversations by session ID
-- **Master agent**: `effort: "high"` for quality decisions, all tools enabled
+- **Master agent**: `effort: "high"`, all tools enabled, subagents for sequential delegation (researcher/code-writer/reviewer)
 - **Worker agents**: Fresh session per acquire, conversation context injected via system prompt
+- **SDK Hooks**: PreToolUse security (block .env/credentials), PostToolUse logging + Telegram progress, Notification forwarding
+- **SDK Subagents**: Master delegates to specialist agents via Task tool — researcher (haiku), code-writer (sonnet), reviewer (haiku)
 - **Vision**: SDK `AsyncIterable<SDKUserMessage>` with base64 image content blocks
 - **Streaming**: SDK `includePartialMessages: true` yields `stream_event` messages with text deltas
 - **Retry**: Exponential backoff on transient errors (429, 503, ETIMEDOUT, ECONNRESET, rate_limit, server_error)
