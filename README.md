@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/bot-Telegram-26a5e4?logo=telegram&logoColor=fff" alt="Telegram"/>
   <img src="https://img.shields.io/badge/AI-Claude-d4a574?logo=anthropic&logoColor=fff" alt="Claude"/>
   <a href="https://github.com/egeominotti/bunqueue"><img src="https://img.shields.io/badge/scheduler-bunqueue-ff6b35" alt="bunqueue"/></a>
-  <img src="https://img.shields.io/badge/tests-346_passed-brightgreen" alt="Tests"/>
+  <img src="https://img.shields.io/badge/tests-387_passed-brightgreen" alt="Tests"/>
 </p>
 
 ---
@@ -25,6 +25,8 @@
 - **Telegram bot** — multi-chat, voice messages, photos, documents, edited messages
 - **Persistent memory** — SQLite WAL, conversations resume across restarts
 - **Auto-team task queue** — bunqueue-backed subtask distribution for parallel agent execution
+- **SDK Hooks** — security enforcement (block .env/credentials), tool logging, Telegram progress, notification forwarding
+- **SDK Subagents** — master delegates to specialists via Task tool: researcher (haiku), code-writer (sonnet), reviewer (haiku)
 - **Scheduled jobs** — cron, interval, delay, one-shot via [bunqueue](https://github.com/egeominotti/bunqueue) MCP integration
 - **Sandbox isolation** — each agent runs in `/tmp/synapse-agent-*` with safety rules
 - **Auto-team** — master decomposes complex tasks, workers execute in parallel
@@ -120,10 +122,10 @@ ChatQueue ─── Semaphore (in-memory, per-chat ordering)
 AgentPool ─── Master (resume) + N-1 Workers (fresh memory)
     │
 Agent ─── @anthropic-ai/claude-agent-sdk query() API
-    │                    │
- ┌──┴──┐          TaskQueue (bunqueue)
- ▼     ▼          auto-team subtasks → workers in parallel
-History SessionStore ──► SQLite (WAL)
+    │                    │                    │
+ ┌──┴──┐          TaskQueue (bunqueue)   Hooks + Subagents
+ ▼     ▼          auto-team parallel     security, progress,
+History SessionStore ──► SQLite (WAL)    researcher/code-writer/reviewer
                           ▲
               ┌───────────┼───────────┐
               ▼           ▼           ▼
@@ -142,13 +144,13 @@ History SessionStore ──► SQLite (WAL)
 | Scheduler | [bunqueue](https://github.com/egeominotti/bunqueue) (MCP) |
 | Voice     | Groq API + whisper.cpp                                    |
 | Logging   | pino                                                      |
-| Testing   | bun:test (346 tests)                                      |
+| Testing   | bun:test (387 tests)                                      |
 | CI/CD     | GitHub Actions + Husky                                    |
 
 ## Development
 
 ```bash
-bun test              # 346 tests
+bun test              # 387 tests
 bun run typecheck     # TypeScript strict check
 bun run lint          # ESLint
 bun run format        # Prettier
